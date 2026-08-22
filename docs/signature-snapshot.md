@@ -19,6 +19,12 @@ proof bodies and proved helper lemmas may change freely.
   `seqPositive`, `capacityBounded`, `keepLatest`, theorems T3–T7, and a third trace. No r1
   declaration changed type or meaning; `streamInv` is kept exactly as frozen and the new
   invariants sit beside it rather than widening it.
+- **r2.1** (2026-08-22, slices plan slice 2): traces became data — `Expect`, `TraceStep`,
+  `ViewCheck`, `Trace`, `runTrace` — and the trace theorems are restated as
+  `runTrace t = true` (eight traces plus `all_traces`; the former `positiveTraceChecks`,
+  `rejectedTraceChecks`, `pruneRollupTraceChecks` are gone, their content redistributed). No
+  T1–T7 statement changed. `Main.lean` (`lake exe effect_nats_traces`) prints `allTraces` as
+  the deterministic replay fixture; it is the only module importing `Lean`.
 
 ## Carriers and transitions
 
@@ -56,6 +62,13 @@ inductive Reachable : JSState → Prop
 def seqPositive     : StreamState → Prop  -- r2: 0 < nextSequence ∧ every stored sequence > 0
 def capacityBounded : StreamState → Prop  -- r2: positive limit ⇒ ∀ subject, |forSubject| ≤ limit
 def keepLatest : Nat → List StoredMessage → List StoredMessage   -- r2: spec-side "most recent n"
+
+inductive Expect      -- r2.1: ok (r : Ret) | error (e : JSError)
+structure TraceStep   -- r2.1: op, expect, replay : Bool (false = model-only, not exported)
+structure ViewCheck   -- r2.1: stream, subject?, expected payload tokens of the view
+structure Trace       -- r2.1: name, mirrors, steps, views
+def runTrace : Trace → Bool   -- r2.1: fold step over steps, exact outcomes, then check views
+def allTraces : List Trace    -- r2.1: what the exporter prints, in fixture order
 ```
 
 ## Frozen theorems — r1
@@ -89,9 +102,9 @@ theorem publish_assigns :
   ∃ st, lookupStream s stream = some st ∧ r = .sequence st.nextSequence
     ∧ ∃ st', lookupStream s' stream = some st' ∧ st'.nextSequence = st.nextSequence + 1
 
--- worked traces (kernel-checked)
-theorem positive_trace : positiveTraceChecks = true
-theorem rejected_trace : rejectedTraceChecks = true
+-- worked traces (kernel-checked; r2.1 form)
+theorem positive_trace : runTrace positiveTrace = true     -- C1, C3, C4
+theorem rejected_trace : runTrace rejectedTrace = true     -- C1, C2 (+ model-only negative capacity)
 ```
 
 ## Frozen theorems — r2
@@ -174,8 +187,14 @@ theorem publish_unbound :
   step s (.publish stream subject payload headers expected? now)
     = .error (.subjectNotBound stream subject)
 
--- worked trace (kernel-checked), mirrors conformance C3/C5/C6
-theorem prune_rollup_trace : pruneRollupTraceChecks = true
+-- worked traces (kernel-checked; r2.1)
+theorem prune_trace         : runTrace pruneTrace = true          -- C5, C4 typed absence
+theorem rollup_trace        : runTrace rollupTrace = true         -- C6
+theorem rollup_denied_trace : runTrace rollupDeniedTrace = true   -- C6 gate
+theorem cas_trace           : runTrace casTrace = true            -- C3 incl. expected/actual
+theorem delete_trace        : runTrace deleteTrace = true         -- C10 getStream after delete; T12′ restart at 1
+theorem config_order_trace  : runTrace configOrderTrace = true    -- order-sensitive ConfigEq (live finding target)
+theorem all_traces          : allTraces.all runTrace = true
 ```
 
 Errors preserve state by construction (`step` returns `Except`); there is no theorem to

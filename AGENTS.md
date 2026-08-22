@@ -38,6 +38,12 @@ document, never the other way around.
 - **Per-stream invariants go through `reachable_all`.** A new invariant on reachable streams
   is a predicate with a create case and an `applyPublish` case; do not write a second
   induction over `Reachable`.
+- **Traces are data.** A new trace is a `Trace` value, its `runTrace … = true` theorem, and an
+  entry in `allTraces`; the exporter prints `allTraces`, and the effect-nats fixture is
+  regenerated from it (slices plan, slice 2). A step the memory interpreter cannot replay
+  (boundary validation the model performs and the interpreter does not) carries
+  `replay := false`; nothing else is ever hidden from the fixture. `Main.lean` is the only
+  module that may import `Lean`; the library stays on `Init`.
 
 ## Gate
 
@@ -55,4 +61,6 @@ lake build   # must be clean: no errors, no warnings
   external dependencies — Lean core only.
 - `decide`-checked traces stay kernel-reducible: structural recursion only in anything `step`
   evaluates (no `String.splitOn`-style well-founded helpers).
+- The exporter is deterministic: `lake build effect_nats_traces && lake exe effect_nats_traces`
+  twice, `cmp` the outputs (Foldable law 4 — no timestamps, paths, or randomness).
 - No nested `.git`; `.lake/` stays gitignored.

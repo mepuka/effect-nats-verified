@@ -4,3 +4,7 @@ defaultTargets = ["EffectNatsSubstrate"]
 
 [[lean_lib]]
 name = "EffectNatsSubstrate"
+
+[[lean_exe]]
+name = "effect_nats_traces"
+root = "Main"

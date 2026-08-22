@@ -12,3 +12,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: leanprover/lean-action@v1
+      - name: Trace exporter is deterministic
+        run: |
+          lake build effect_nats_traces
+          lake exe effect_nats_traces > /tmp/traces-a.json
+          lake exe effect_nats_traces > /tmp/traces-b.json
+          cmp /tmp/traces-a.json /tmp/traces-b.json
