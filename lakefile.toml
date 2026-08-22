@@ -1,0 +1,6 @@
+name = "effect_nats_substrate"
+version = "0.1.0"
+defaultTargets = ["EffectNatsSubstrate"]
+
+[[lean_lib]]
+name = "EffectNatsSubstrate"
