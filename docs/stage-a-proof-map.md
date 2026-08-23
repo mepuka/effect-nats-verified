@@ -23,9 +23,9 @@
 | `SubTraces.lean` | `SubTraceStep`, `SubTrace`, `runSubTraceWith`, W1 `pullStepW1`, W2 `deliverOneW2`, eight traces, helpers | kernel witnesses; wrong models through the same runner |
 | `SubInvariants.lean` | `entrySequences`, `visible`, `SubInv` (eleven clauses), `StateInv`, `SubShape` | the invariants as predicates |
 | `SubCore.lean` | lookups through `updateStream`/`removeStream`/`insertStream` (incl. `lookupStream_removeStream_self`); `applyPublish_nextSequence`, `publishStep_ok_eq`, `deleteStep_ok_eq`, `createStep_lookup_preserved`, `createStep_ok_shape`, `getStep_ok_eq`, `lastMsgStep_ok_eq`, `step_lookup_preserved`; `entrySequences_*` list helpers and the `visible` equations (`entrySequences_visible_admit`, `entrySequences_visible_fail`, `entrySequences_visible_newSubscriber`, `visible_admit`, `visible_drain`, `visible_drain_done`); `pairwise_*`; `SubInv.of_stream_lookup`, `SubInv.pulled` (over an arbitrary successor subscriber) | facts about the first-slice core and the `visible` equations the subscriber layer consumes |
-| `SubProofs.lean` | `*_core` frame lemmas, `applyOp_ok_eq`, SA1 `reachableSub_core`; `selectReplay_sublist/_mem/_pairwise`; `SubInv.core_eq`, `SubInv.of_lookups` (both instances of `of_stream_lookup`); the three faces `deliverOne_admit`/`_overflow`/`_skip` and `endOne_skip`; per-label preservation `newSubscriber_inv`, `pullStep_inv`, `unsubscribe_inv`, `deliverOne_inv` (through the faces), `endOne_inv` | one preservation lemma per transition function |
+| `SubProofs.lean` | `*_core` frame lemmas, `applyOp_ok_eq`, `applyOp_error_eq`, SA1 `reachableSub_core`; `selectReplay_sublist/_mem/_pairwise`; `SubInv.core_eq`, `SubInv.of_lookups` (both instances of `of_stream_lookup`); the faces `deliverOne_admit`/`_overflow`/`_overflow_closing`/`_skip`, `endOne_skip`/`endOne_end`, `pullStep_ok_eq`; per-label preservation `newSubscriber_inv`, `pullStep_inv`, `unsubscribe_inv`, `deliverOne_inv` (through the faces), `endOne_inv`; `registered_false_of_status` | one preservation lemma per transition function |
 | `SubReachable.lean` | `mem_of_lookupSub`, `mem_updateSub_eq` (strong form; `mem_updateSub` derived), `applyRegister_enabled`; `afterOp_inv`, `applyOp_inv`, `applyRegister_inv`, `applyPull_inv`, `applyUnsubscribe_inv`, `apply_inv`; SA2 `stateInv_reachable`, SA3 `pending_le_capacity`; **`reachableSub_all`**; `lookupSub_*` (update/fresh/append/map/of_mem_pairwise), `updateSub_keys`, `keys_map_snd`, `shape_of_keys`, `apply_shape`, `subShape_reachable` | the only `ReachableSub` induction and the principle everything else uses |
-| `SubStatements.lean` | `sub_core_inv`; `publishedMessage`; `afterOp_publish_sub`, `publish_sub`; SA4a/c/d; SA5; SA6; `LagInv`, `LagState`, `lagInv_*`, `lagState_afterOp`, `apply_lag`, `lagState_reachable`; SA7 (`lagged_iff_of_open`, the explicit-premise form, with `lagged_iff` as its corollary); `applyAll`, `Negative`, `subNegatives`, `all_sub_negatives` | the frozen statements beyond SA1–SA3 |
+| `SubStatements.lean` | `sub_core_inv`; `publishedMessage`; `afterOp_publish_sub`, `publish_sub`, `eq_of_sequence_eq_of_pairwise`; SA4a/c/d; SA5; SA6; `LagInv`, `LagState`, `lagInv_*`, `lagState_afterOp`/`lagState_applyOp`/`lagState_applyRegister`/`lagState_applyPull`/`lagState_applyUnsubscribe`, `apply_lag`, `lagState_reachable`; SA7 (`lagged_iff_of_open`, the explicit-premise form, with `lagged_iff` as its corollary); `applyAll`, `Negative`, `NegKind`, `negativeHolds`, `subNegatives` with the `negOpts`/`negCreate`/`negPublish`/`negRegister` witnesses, `all_sub_negatives` | the frozen statements beyond SA1–SA3 |
 | `SubHistory.lean` | `RegInfo`, `SubStateH`, `initialSubH`, `erase`, `lookupReg`, `labelMessage`, `committedAfter`, `regsAfter`, `applyH`, `NextH`, `ReachableSubH`, `liveKeep`, `liveOf`, `liveEntries`; AV1/AV2; `lookupReg_*`, `liveOf_*` (`liveOf_admit`); `HistInv`, `histInv_*`, `histInv_reachable`; SA5h `visible_global`, `entries_committed` | the proof-only ledger (history variable) |
 
 Dependency order: `Subscriber → SelectReplay → Next → SubTraces → SubInvariants → SubCore →
@@ -62,8 +62,12 @@ publish it obtains the stored stream, the exact core update, and the returned se
 
 `reachableSub_all {P} (hinit) (hstep : ∀ {s s' l}, ReachableSub s → StateInv s → P s →
 apply s l = some s' → P s') : ReachableSub s → P s` — the step case may assume the pre-state
-satisfies `StateInv`, which is what every later invariant needs. Package rule: no other
-`induction h` over `ReachableSub`; state a predicate and use this.
+satisfies `StateInv`, which is what every later invariant needs. Package rule: no `induction`
+over `ReachableSub` other than the two bootstrap inductions (`reachableSub_core` in
+`SubProofs.lean`, `stateInv_reachable` in `SubReachable.lean`, from which `reachableSub_all`
+is built) and `reachableSub_all` itself; state a predicate and go through `reachableSub_all`.
+(The same discipline holds for `ReachableSubH`: bootstrap in `SubHistory.lean`, consume
+through its `all` lemma.)
 
 `SubShape s := (s.subs.map Prod.fst).Pairwise (· < ·) ∧ ∀ p ∈ s.subs, p.1 < s.nextId`.
 `apply_shape` (via `shape_of_keys`: the key list is unchanged by a value map

@@ -108,9 +108,9 @@ EffectNatsSubstrate/
   Next.lean          labels, fan-out, pull, the transition function, reachability
   SubTraces.lean     the subscriber traces and the two wrong models
   SubInvariants.lean the subscriber invariant and the visible sequence
-  SubCore.lean       facts about the core the subscriber proofs use
+  SubCore.lean       core facts and the visible/entrySequences equations the subscriber proofs use
   SubProofs.lean     preservation of the invariant by each transition
-  SubReachable.lean  the one induction over reachable states
+  SubReachable.lean  reachability: two bootstrap inductions and reachableSub_all, which every later fact goes through
   SubStatements.lean SA4–SA7 and the negative witnesses
   SubHistory.lean    the ledger model and the global statement SA5h
 Main.lean            the fixture exporter
