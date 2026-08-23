@@ -1273,4 +1273,379 @@ theorem rel_consumer {s s' : RtState} {i : SubId} {r r' : RtSubscriber} {lab : L
       · intro hnl hno hlu
         exact ⟨noUnsub_append hnl (noUnsub_single hlu), hno⟩
 
+/-! ## One runtime step -/
+
+/-- What one runtime step must re-establish. -/
+def RelStep (s' : RtState) (labels owed : List Label) (serial : List Label) (l : RtLabel) : Prop :=
+  ∃ labels' owed', Rel s' labels' owed' ∧ RelHist s' labels' owed' ∧
+    labelSerial labels' ++ labelSerial owed' = labelSerial labels ++ labelSerial owed ++ serial ∧
+    ((∀ j, l ≠ .closeA j) → NoUnsub labels → NoUnsub owed → NoUnsub labels' ∧ NoUnsub owed')
+
+theorem rtSubInv_of_lookup {s : RtState} {id : SubId} {r : RtSubscriber} (hinv : RtInv s)
+    (h : lookupRt s.subs id = some r) : RtSubInv s r :=
+  hinv.subs (id, r) (mem_of_lookupRt s.subs id r h)
+
+/-- A runtime step that changes one subscriber and is matched by no abstract label. -/
+theorem rel_silent {s s' : RtState} {i : SubId} {r r' : RtSubscriber} {labels owed : List Label}
+    (hlk : lookupRt s.subs i = some r)
+    (hupd : s' = { s with subs := updateRt s.subs i (fun _ => r') })
+    (hchunks : r'.chunks = r.chunks)
+    (hpend : ∀ f, pendingFail f i r' = pendingFail f i r)
+    (hcorr : ∀ (e? : Option SubError) (a : Subscriber), corrSub (failOpt e? r) a →
+        corrSub (failOpt e? r') a)
+    (hrel : Rel s labels owed) (hhist : RelHist s labels owed) :
+    Rel s' labels owed ∧ RelHist s' labels owed := by
+  obtain ⟨sA, hrun, hnext, hkeys, hquiet, hflight⟩ := hrel
+  have hlk' : lookupRt s'.subs i = some r' := by rw [hupd]; exact lookupRt_update_self hlk
+  have hlkne : ∀ id, id ≠ i → lookupRt s'.subs id = lookupRt s.subs id := by
+    intro id hid
+    rw [hupd]
+    exact lookupRt_updateRt_ne s.subs id i (fun _ => r') hid
+  have hkeys' : s'.subs.map Prod.fst = s.subs.map Prod.fst := by
+    rw [hupd]; exact updateRt_keys s.subs i (fun _ => r')
+  have hnext' : s'.nextId = s.nextId := by rw [hupd]
+  have hcore' : s'.core = s.core := by rw [hupd]
+  have hfan' : s'.fanOut = s.fanOut := by rw [hupd]
+  have hhistEq : ∀ id, rtHistory s' id = rtHistory s id := by
+    intro id
+    by_cases hid : id = i
+    · subst hid
+      rw [rtHistory_eq hlk', rtHistory_eq hlk, hchunks]
+    · unfold rtHistory
+      rw [hlkne id hid]
+  have hisSome : ∀ id, (lookupRt s'.subs id).isSome = true →
+      (lookupRt s.subs id).isSome = true := by
+    intro id hs
+    by_cases hid : id = i
+    · subst hid; rw [hlk]; rfl
+    · rw [← hlkne id hid]; exact hs
+  constructor
+  · refine ⟨sA, hrun, by rw [hnext, hnext'], by rw [hkeys, hkeys'], ?_, ?_⟩
+    · intro hq
+      rw [hfan'] at hq
+      obtain ⟨ho, hc, hca⟩ := hquiet hq
+      refine ⟨ho, by rw [hc, hcore'], ?_⟩
+      intro id r₀ hlkr
+      by_cases hid : id = i
+      · subst hid
+        rw [hlk'] at hlkr
+        cases hlkr
+        obtain ⟨a, hlka, hcorra⟩ := hca id r hlk
+        exact ⟨a, hlka, hcorr none a hcorra⟩
+      · rw [hlkne id hid] at hlkr
+        exact hca id r₀ hlkr
+    · intro f hf
+      rw [hfan'] at hf
+      obtain ⟨hfresh, hpre, hrcore, hcorrPre, owedRest, sPost, howed, howedOk, hrunPost,
+        hcorrPost⟩ := hflight f hf
+      refine ⟨hfresh, hpre, ?_, ?_, owedRest, sPost, howed, howedOk, hrunPost, ?_⟩
+      · exact ⟨fun stream m el hk => by rw [hcore']; exact hrcore.1 stream m el hk,
+          fun name hk => by rw [hcore']; exact hrcore.2 name hk⟩
+      · intro id r₀ hlkr hnp
+        by_cases hid : id = i
+        · subst hid
+          rw [hlk'] at hlkr
+          cases hlkr
+          obtain ⟨a, hlka, hcorra⟩ := hcorrPre id r hlk hnp
+          exact ⟨a, hlka, hcorr none a hcorra⟩
+        · rw [hlkne id hid] at hlkr
+          exact hcorrPre id r₀ hlkr hnp
+      · intro id r₀ hlkr hp
+        by_cases hid : id = i
+        · subst hid
+          rw [hlk'] at hlkr
+          cases hlkr
+          obtain ⟨a, hlka, hcorra⟩ := hcorrPost id r hlk hp
+          refine ⟨a, hlka, ?_⟩
+          rw [pendingOf_eq] at hcorra ⊢
+          rw [hpend f]
+          exact hcorr (pendingFail f id r) a hcorra
+        · rw [hlkne id hid] at hlkr
+          exact hcorrPost id r₀ hlkr hp
+  · intro id hsome
+    obtain ⟨hq, hf⟩ := hhist id (hisSome id hsome)
+    refine ⟨fun hq' => ?_, fun f hf' => ?_⟩
+    · rw [hhistEq id]
+      rw [hfan'] at hq'
+      exact hq hq'
+    · rw [hfan'] at hf'
+      obtain ⟨h₁, h₂⟩ := hf f hf'
+      exact ⟨fun hp => by rw [hhistEq id]; exact h₁ hp, fun hnp => by rw [hhistEq id]; exact h₂ hnp⟩
+
+
+theorem pullStep_targetStable {a a' : Subscriber} (h : pullStep a = some a') :
+    TargetStable a a' := by
+  rcases pullStep_ok_eq h with ⟨e, hst, heq⟩ | ⟨hst, -, heq⟩ | ⟨e, hst, -, heq⟩ <;>
+    exact Or.inl ⟨by rw [hst]; intro hc; exact QueueStatus.noConfusion hc,
+      by rw [heq], by rw [heq], by rw [heq]⟩
+
+theorem flatten_single (c : List Observed) : ([c] : History).flatten = c := by simp
+
+/-- The abstract side of one returning take, as `rel_consumer` wants it. -/
+theorem pull_habs {r r' : RtSubscriber} {q' : EffectQueue} {i : SubId} {c : List Observed}
+    (hro : r.registered = true → r.queue.status = .opened)
+    (hcs : r.closeStarted = false)
+    (hr' : r' = { r with queue := q', chunks := r.chunks ++ [c] })
+    (hcase : TakeCase r.queue q' c) :
+    ∀ (e? : Option SubError) (u : SubState) (a : Subscriber),
+      lookupSub u.subs i = some a → corrSub (failOpt e? r) a →
+      ∃ u' a', apply u (.pull i) = some u' ∧ AgreeExcept i u u' ∧
+        lookupSub u'.subs i = some a' ∧ corrSub (failOpt e? r') a' ∧
+        a'.observed = a.observed ++ ([c] : History).flatten ∧ TargetStable a a' := by
+  intro e? u a hlka hca
+  obtain ⟨a', hp, hobs, hc'⟩ := take_corr hro hcs hca hcase
+  have hap : apply u (.pull i) = some { u with subs := updateSub u.subs i (fun _ => a') } := by
+    show applyPull pullStep u i = _
+    unfold applyPull
+    simp only [hlka, hp]
+  refine ⟨{ u with subs := updateSub u.subs i (fun _ => a') }, a', hap,
+    agreeExcept_of_pull hap, lookupSub_updateSub_self (fun _ => a') hlka, ?_, ?_,
+    pullStep_targetStable hp⟩
+  · rw [hr']; exact hc'
+  · rw [hobs, flatten_single]
+
+theorem pull_hafter {i : SubId} {c : List Observed} :
+    ∀ (u u' : SubState) (a a' : Subscriber) (h : History),
+      lookupSub u.subs i = some a → lookupSub u'.subs i = some a' →
+      a'.observed = a.observed ++ ([c] : History).flatten →
+      afterLabel u u' i h (.pull i) = h ++ [c] := by
+  intro u u' a a' h hlka hlka' hobs
+  show (if i = i then h ++ [(observedOf u' i).drop (observedOf u i).length] else h) = h ++ [c]
+  rw [if_pos rfl]
+  have h1 : observedOf u i = a.observed := by unfold observedOf; rw [hlka]
+  have h2 : observedOf u' i = a'.observed := by unfold observedOf; rw [hlka']
+  rw [h1, h2, hobs, flatten_single, List.drop_left]
+
+/-- The abstract side of `closeA`. -/
+theorem unsub_habs {r r' : RtSubscriber} {i : SubId}
+    (hcs : r.closeStarted = false) (hsd : r.queue.status ≠ .shutDown)
+    (hr' : r' = { r with registered := false, closeStarted := true }) :
+    ∀ (e? : Option SubError) (u : SubState) (a : Subscriber),
+      lookupSub u.subs i = some a → corrSub (failOpt e? r) a →
+      ∃ u' a', apply u (.unsubscribe i) = some u' ∧ AgreeExcept i u u' ∧
+        lookupSub u'.subs i = some a' ∧ corrSub (failOpt e? r') a' ∧
+        a'.observed = a.observed ++ ([] : History).flatten ∧ TargetStable a a' := by
+  intro e? u a hlka hca
+  obtain ⟨hne, hc'⟩ := closeA_corr hcs hsd hca
+  have hap : apply u (.unsubscribe i) = some { u with
+      subs := updateSub u.subs i
+        (fun sub => { sub with registered := false, pending := [], status := .shutDown }) } := by
+    show applyUnsubscribe u i = _
+    unfold applyUnsubscribe
+    simp only [hlka, if_neg hne]
+  refine ⟨_, _, hap, agreeExcept_of_unsubscribe hap,
+    lookupSub_updateSub_self _ hlka, ?_, ?_, Or.inr ⟨rfl, rfl⟩⟩
+  · rw [hr']; exact hc'
+  · simp
+
+theorem unsub_hafter {i : SubId} :
+    ∀ (u u' : SubState) (a a' : Subscriber) (h : History),
+      lookupSub u.subs i = some a → lookupSub u'.subs i = some a' →
+      a'.observed = a.observed ++ ([] : History).flatten →
+      afterLabel u u' i h (.unsubscribe i) = h ++ [] := by
+  intro u u' a a' h _ _ _
+  show h = h ++ []
+  rw [List.append_nil]
+
+
+theorem relStep_of_consumer {s' : RtState} {labels owed : List Label} {l : RtLabel} {lab : Label}
+    (hlu : (∀ j, l ≠ RtLabel.closeA j) → ∀ j, lab ≠ Label.unsubscribe j)
+    (h : ∃ labels' owed', Rel s' labels' owed' ∧ RelHist s' labels' owed' ∧
+      labelSerial labels' ++ labelSerial owed' = labelSerial labels ++ labelSerial owed ∧
+      (NoUnsub labels → NoUnsub owed → (∀ j, lab ≠ Label.unsubscribe j) →
+        NoUnsub labels' ∧ NoUnsub owed')) :
+    RelStep s' labels owed [] l := by
+  obtain ⟨labels', owed', h₁, h₂, h₃, h₄⟩ := h
+  exact ⟨labels', owed', h₁, h₂, by rw [h₃, List.append_nil], fun hc hl ho => h₄ hl ho (hlu hc)⟩
+
+theorem relStep_of_silent {s' : RtState} {labels owed : List Label} {l : RtLabel}
+    (h : Rel s' labels owed ∧ RelHist s' labels owed) : RelStep s' labels owed [] l :=
+  ⟨labels, owed, h.1, h.2, by rw [List.append_nil], fun _ hl ho => ⟨hl, ho⟩⟩
+
+theorem rel_step_pull {s s' : RtState} {id : SubId} (hinv : RtInv s)
+    (hstep : rtPull s id = some s') {labels owed : List Label}
+    (hrel : Rel s labels owed) (hhist : RelHist s labels owed) :
+    RelStep s' labels owed [] (.pull id) := by
+  unfold rtPull at hstep
+  cases hlk : lookupRt s.subs id with
+  | none => simp only [hlk] at hstep; simp at hstep
+  | some r =>
+    simp only [hlk] at hstep
+    split at hstep
+    · cases hstep
+    · rename_i hg
+      simp only [Bool.or_eq_true, not_or, decide_eq_true_eq] at hg
+      obtain ⟨⟨htk, hsd⟩, hcs0⟩ := hg
+      have hcs : r.closeStarted = false := by
+        cases hb : r.closeStarted with
+        | false => rfl
+        | true => exact absurd hb hcs0
+      have hsub := rtSubInv_of_lookup hinv hlk
+      have hro : r.registered = true → r.queue.status = .opened :=
+        fun hb => (hsub.registeredOpen hb).1
+      have hlu : (∀ j, RtLabel.pull id ≠ RtLabel.closeA j) → ∀ j, Label.pull id ≠ Label.unsubscribe j :=
+        fun _ j hc => Label.noConfusion hc
+      cases hst : r.queue.status with
+      | shutDown => exact absurd hst hsd
+      | done e =>
+        rw [exit_after_drain r.queue e hst] at hstep
+        simp only [chunkOf] at hstep
+        cases hstep
+        refine relStep_of_consumer hlu (rel_consumer (lab := Label.pull id)
+          (ch := [[Observed.failed e]]) hlk rfl (Or.inl rfl) rfl
+          (fun f => pendingFail_congr f id rfl)
+          (pull_habs hro hcs rfl ?_) pull_hafter hrel hhist)
+        exact Or.inr (Or.inr ⟨e, hst, hsub.queue.doneEmpty e hst, rfl, rfl⟩)
+      | opened =>
+        by_cases hb : r.queue.buffer = []
+        · have htake : r.queue.takeAll = ({ r.queue with taker := true }, .parked) := by
+            unfold EffectQueue.takeAll
+            rw [hst]
+            simp [hb, hst]
+          rw [htake] at hstep
+          simp only [chunkOf] at hstep
+          cases hstep
+          exact relStep_of_silent (rel_silent hlk rfl rfl (fun f => pendingFail_congr f id rfl)
+            (fun e? a hc => park_corr hcs hsd hc rfl rfl) hrel hhist)
+        · rw [takeAll_drains r.queue hst hb] at hstep
+          simp only [chunkOf] at hstep
+          cases hstep
+          refine relStep_of_consumer hlu (rel_consumer (lab := Label.pull id)
+            (ch := [r.queue.buffer.map Observed.entry]) hlk rfl (Or.inl rfl) rfl
+            (fun f => pendingFail_congr f id rfl)
+            (pull_habs hro hcs rfl ?_) pull_hafter hrel hhist)
+          exact Or.inl ⟨hst, hb, rfl, hst, rfl⟩
+      | closing e =>
+        by_cases hb : r.queue.buffer = []
+        · exact absurd hb (hsub.queue.closingNonempty e hst)
+        · rw [takeAll_closing r.queue e hst hb] at hstep
+          simp only [chunkOf] at hstep
+          cases hstep
+          refine relStep_of_consumer hlu (rel_consumer (lab := Label.pull id)
+            (ch := [r.queue.buffer.map Observed.entry]) hlk rfl (Or.inl rfl) rfl
+            (fun f => pendingFail_congr f id rfl)
+            (pull_habs hro hcs rfl ?_) pull_hafter hrel hhist)
+          exact Or.inr (Or.inl ⟨e, hst, hb, rfl, rfl, rfl⟩)
+
+
+theorem rel_step_wake {s s' : RtState} {id : SubId} (hinv : RtInv s)
+    (hstep : rtWake s id = some s') {labels owed : List Label}
+    (hrel : Rel s labels owed) (hhist : RelHist s labels owed) :
+    RelStep s' labels owed [] (.wake id) := by
+  unfold rtWake at hstep
+  cases hlk : lookupRt s.subs id with
+  | none => simp only [hlk] at hstep; simp at hstep
+  | some r =>
+    simp only [hlk] at hstep
+    split at hstep
+    · cases hstep
+    · rename_i hcs0
+      have hcs : r.closeStarted = false := by
+        cases hb : r.closeStarted with
+        | false => rfl
+        | true => exact absurd hb hcs0
+      have hsub := rtSubInv_of_lookup hinv hlk
+      have hro : r.registered = true → r.queue.status = .opened :=
+        fun hb => (hsub.registeredOpen hb).1
+      have hlu : (∀ j, RtLabel.wake id ≠ RtLabel.closeA j) →
+          ∀ j, Label.pull id ≠ Label.unsubscribe j := fun _ j hc => Label.noConfusion hc
+      by_cases htk : r.queue.taker = true
+      · cases hst : r.queue.status with
+        | shutDown =>
+          have hw : r.queue.wake = none := by unfold EffectQueue.wake; simp [htk, hst]
+          rw [hw] at hstep
+          simp at hstep
+        | done e =>
+          have hw : r.queue.wake =
+              some ({ r.queue with status := .shutDown, taker := false }, .exit e) := by
+            unfold EffectQueue.wake; simp [htk, hst]
+          rw [hw] at hstep
+          simp only [chunkOf] at hstep
+          cases hstep
+          refine relStep_of_consumer hlu (rel_consumer (lab := Label.pull id)
+            (ch := [[Observed.failed e]]) hlk rfl (Or.inl rfl) rfl
+            (fun f => pendingFail_congr f id rfl)
+            (pull_habs hro hcs rfl ?_) pull_hafter hrel hhist)
+          exact Or.inr (Or.inr ⟨e, hst, hsub.queue.doneEmpty e hst, rfl, rfl⟩)
+        | opened =>
+          by_cases hb : r.queue.buffer = []
+          · have hw : r.queue.wake = none := by unfold EffectQueue.wake; simp [htk, hst, hb]
+            rw [hw] at hstep
+            simp at hstep
+          · have hw : r.queue.wake =
+                some ({ r.queue with buffer := [], taker := false }, .chunk r.queue.buffer) := by
+              unfold EffectQueue.wake; simp [htk, hst, hb]
+            rw [hw] at hstep
+            simp only [chunkOf] at hstep
+            cases hstep
+            refine relStep_of_consumer hlu (rel_consumer (lab := Label.pull id)
+              (ch := [r.queue.buffer.map Observed.entry]) hlk rfl (Or.inl rfl) rfl
+              (fun f => pendingFail_congr f id rfl)
+              (pull_habs hro hcs rfl ?_) pull_hafter hrel hhist)
+            exact Or.inl ⟨hst, hb, rfl, hst, rfl⟩
+        | closing e =>
+          by_cases hb : r.queue.buffer = []
+          · exact absurd hb (hsub.queue.closingNonempty e hst)
+          · have hw : r.queue.wake =
+                some ({ r.queue with buffer := [], status := .done e, taker := false },
+                  .chunk r.queue.buffer) := by
+              unfold EffectQueue.wake; simp [htk, hst, hb]
+            rw [hw] at hstep
+            simp only [chunkOf] at hstep
+            cases hstep
+            refine relStep_of_consumer hlu (rel_consumer (lab := Label.pull id)
+              (ch := [r.queue.buffer.map Observed.entry]) hlk rfl (Or.inl rfl) rfl
+              (fun f => pendingFail_congr f id rfl)
+              (pull_habs hro hcs rfl ?_) pull_hafter hrel hhist)
+            exact Or.inr (Or.inl ⟨e, hst, hb, rfl, rfl, rfl⟩)
+      · have hw : r.queue.wake = none := by unfold EffectQueue.wake; simp [htk]
+        rw [hw] at hstep
+        simp at hstep
+
+theorem rel_step_closeA {s s' : RtState} {id : SubId} (_hinv : RtInv s)
+    (hstep : rtCloseA s id = some s') {labels owed : List Label}
+    (hrel : Rel s labels owed) (hhist : RelHist s labels owed) :
+    RelStep s' labels owed [] (.closeA id) := by
+  unfold rtCloseA at hstep
+  cases hlk : lookupRt s.subs id with
+  | none => simp only [hlk] at hstep; simp at hstep
+  | some r =>
+    simp only [hlk] at hstep
+    split at hstep
+    · cases hstep
+    · rename_i hg
+      simp only [Bool.or_eq_true, not_or, decide_eq_true_eq] at hg
+      obtain ⟨hcs0, hsd⟩ := hg
+      have hcs : r.closeStarted = false := by
+        cases hb : r.closeStarted with
+        | false => rfl
+        | true => exact absurd hb hcs0
+      cases hstep
+      refine relStep_of_consumer (l := RtLabel.closeA id) (fun hc => absurd rfl (hc id))
+        (rel_consumer (lab := Label.unsubscribe id) (ch := []) hlk rfl (Or.inr rfl) ?_
+          (fun f => pendingFail_congr f id rfl)
+          (unsub_habs hcs hsd rfl) unsub_hafter hrel hhist)
+      rw [List.append_nil]
+
+theorem rel_step_closeB {s s' : RtState} {id : SubId} (_hinv : RtInv s)
+    (hstep : rtCloseB s id = some s') {labels owed : List Label}
+    (hrel : Rel s labels owed) (hhist : RelHist s labels owed) :
+    RelStep s' labels owed [] (.closeB id) := by
+  unfold rtCloseB at hstep
+  cases hlk : lookupRt s.subs id with
+  | none => simp only [hlk] at hstep; simp at hstep
+  | some r =>
+    simp only [hlk] at hstep
+    split at hstep
+    · cases hstep
+    · rename_i hg
+      have hcs : r.closeStarted = true := by
+        cases hb : r.closeStarted with
+        | false => rw [hb] at hg; simp at hg
+        | true => rfl
+      cases hstep
+      exact relStep_of_silent (rel_silent hlk rfl rfl (fun f => pendingFail_congr f id rfl)
+        (fun e? a hc => closeB_corr hcs hc) hrel hhist)
+
+
 end EffectNatsSubstrate
