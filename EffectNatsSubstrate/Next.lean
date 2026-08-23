@@ -119,9 +119,18 @@ def applyOp (s : SubState) (o : Op) (e : Expect) : Option SubState :=
   | .error err, .error err' => if err = err' then some s else none
   | _, _ => none
 
-/-- Registration is enabled for the next id and a capacity `≥ 1`; on a missing
-stream it reports `StreamNotFound` and changes nothing (`requireStream`, `:226`,
-fails before any acquisition). -/
+/-- The environment's pre-enqueue value is admissible when it bounds every
+replayed entry and sits below the stream head — true of the memory interpreter's
+`nextSequence - 1` and of the live adapter's `0` with an empty replay
+(slice document §4.2, §9.1). -/
+def replayBound (messages : List StoredMessage) (opts : ConsumeOptions)
+    (lastEnqueued₀ nextSequence : StreamSeq) : Bool :=
+  (selectReplay messages opts).all (fun m => decide (m.sequence ≤ lastEnqueued₀))
+    && decide (lastEnqueued₀ < nextSequence)
+
+/-- Registration is enabled for the next id, a capacity `≥ 1`, and an admissible
+`lastEnqueued₀`; on a missing stream it reports `StreamNotFound` and changes
+nothing (`requireStream`, `:226`, fails before any acquisition). -/
 def applyRegister (s : SubState) (stream : StreamName) (opts : ConsumeOptions)
     (lastEnqueued₀ : StreamSeq) (id : SubId) (e : Expect) : Option SubState :=
   if id ≠ s.nextId || opts.buffer.capacity = 0 then none
@@ -129,9 +138,11 @@ def applyRegister (s : SubState) (stream : StreamName) (opts : ConsumeOptions)
     match lookupStream s.core stream, e with
     | none, .error (.streamNotFound name) => if name = stream then some s else none
     | some st, .ok .unit =>
-      some { s with
-               subs := s.subs ++ [(id, newSubscriber stream opts lastEnqueued₀ st.messages)]
-               nextId := id + 1 }
+      if replayBound st.messages opts lastEnqueued₀ st.nextSequence then
+        some { s with
+                 subs := s.subs ++ [(id, newSubscriber stream opts lastEnqueued₀ st.messages)]
+                 nextId := id + 1 }
+      else none
     | _, _ => none
 
 def applyPull (s : SubState) (id : SubId) : Option SubState :=

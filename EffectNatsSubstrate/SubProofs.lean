@@ -53,7 +53,9 @@ theorem applyRegister_core {s s' : SubState} {stream : StreamName} {opts : Consu
     · split at h
       · cases h; rfl
       · cases h
-    · cases h; rfl
+    · split at h
+      · cases h; rfl
+      · cases h
     · cases h
 
 theorem applyPull_core {s s' : SubState} {id : SubId}
