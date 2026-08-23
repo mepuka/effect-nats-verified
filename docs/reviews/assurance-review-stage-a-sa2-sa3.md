@@ -342,3 +342,5 @@ Correct pass of 2026-08-23 — the L0 encoding step of `research/2026-08-23-effe
 - [claude | same | P2] APPLIED — two fixture files; `--subscriber`; the sequential fixture and default output byte-identical.
 - [claude | — | Spec: replay flag (proof map §5 item 9)] no change — no `replay` flag on `SubTraceStep`: every stage-A step is realisable by the memory interpreter (valid `createStream`, `publish`, `deleteStream`, `getStream` → `StreamNotFound`); the open question is closed.
 - done — applied 6, rejected 0, deferred 0, no change 1.
+- [claude | research/2026-08-22-effect-nats-subscriber-model-design-note.md §7 | overwatch Q2] APPLIED — "chunk boundaries are invisible to the consumer" → invisible to an element-level consumer (`runForEach`); a chunk-level consumer (`runForEachArray`/`chunks`/`toPull`) sees one array per `takeAll` (`eff:Channel.ts:1231`, `eff:Stream.ts:19166`, opened by the overwatch at rc.111), which the schema-2 harness and stage B record as the consumer history.
+- done (2026-08-23, second entry) — applied 7, rejected 0, deferred 0, no change 1.
