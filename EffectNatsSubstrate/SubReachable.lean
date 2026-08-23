@@ -46,6 +46,27 @@ theorem mem_updateSub :
         · exact Or.inl (List.mem_cons_of_mem _ h1)
         · exact Or.inr ⟨sub', List.mem_cons_of_mem _ h1, h2⟩
 
+/-! ## The enabling condition of `register` -/
+
+/-- A successful registration is for the next id with a positive capacity. -/
+theorem applyRegister_enabled {s s' : SubState} {stream : StreamName} {opts : ConsumeOptions}
+    {l₀ : StreamSeq} {id : SubId} {e : Expect}
+    (h : applyRegister s stream opts l₀ id e = some s') :
+    id = s.nextId ∧ opts.buffer.capacity ≠ 0 := by
+  unfold applyRegister at h
+  split at h
+  · cases h
+  · rename_i hguard
+    refine ⟨?_, ?_⟩
+    · by_cases hne : id = s.nextId
+      · exact hne
+      · exfalso
+        apply hguard
+        simp [hne]
+    · intro hz
+      apply hguard
+      simp [hz]
+
 /-! ## `StateInv` preserved by each label -/
 
 theorem afterOp_inv {s : SubState} {core' : JSState} {o : Op} {r : Ret}
@@ -134,10 +155,11 @@ theorem applyRegister_inv {s s' : SubState} {stream : StreamName} {opts : Consum
     {l₀ : StreamSeq} {id : SubId} {e : Expect}
     (hreach : Reachable s.core) (hinv : StateInv s)
     (h : applyRegister s stream opts l₀ id e = some s') : StateInv s' := by
+  have hcap : opts.buffer.capacity ≠ 0 := (applyRegister_enabled h).2
   unfold applyRegister at h
   split at h
   · cases h
-  · rename_i hguard
+  · rename_i _hguard
     split at h
     · split at h
       · cases h; exact hinv
@@ -151,10 +173,6 @@ theorem applyRegister_inv {s s' : SubState} {stream : StreamName} {opts : Consum
         rcases List.mem_append.mp hp' with hold | hnew
         · exact (hinv p hold).core_eq rfl
         · rw [List.mem_singleton.mp hnew]
-          have hcap : opts.buffer.capacity ≠ 0 := by
-            intro hz
-            apply hguard
-            simp [hz]
           exact newSubscriber_inv hl hcap hbound (reachable_sequences_strict hreach hl).1
       · cases h
     · cases h
@@ -308,27 +326,6 @@ theorem keys_map_snd :
   | p :: rest, g => by
     show p.1 :: (rest.map (fun p => (p.1, g p))).map Prod.fst = p.1 :: rest.map Prod.fst
     rw [keys_map_snd rest g]
-
-/-! ## The enabling condition of `register` -/
-
-/-- A successful registration is for the next id with a positive capacity. -/
-theorem applyRegister_enabled {s s' : SubState} {stream : StreamName} {opts : ConsumeOptions}
-    {l₀ : StreamSeq} {id : SubId} {e : Expect}
-    (h : applyRegister s stream opts l₀ id e = some s') :
-    id = s.nextId ∧ opts.buffer.capacity ≠ 0 := by
-  unfold applyRegister at h
-  split at h
-  · cases h
-  · rename_i hguard
-    refine ⟨?_, ?_⟩
-    · by_cases hne : id = s.nextId
-      · exact hne
-      · exfalso
-        apply hguard
-        simp [hne]
-    · intro hz
-      apply hguard
-      simp [hz]
 
 /-! ## The state shape is preserved and holds on every reachable state -/
 
