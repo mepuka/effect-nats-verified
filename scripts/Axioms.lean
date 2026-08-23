@@ -214,3 +214,9 @@ open EffectNatsSubstrate
 #print axioms applyPull_agreeAt
 #print axioms apply_agreeAt
 #print axioms observedOf_agreeAt
+#print axioms allSubTraces_count
+#print axioms allRtTraces_count
+#print axioms sb1_witness
+#print axioms sb3_witness
+#print axioms a4complete_witness
+#print axioms a4inclusion_witness

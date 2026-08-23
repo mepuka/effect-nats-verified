@@ -123,6 +123,7 @@ EffectNatsSubstrate/
   Sim.lean           the stage-B1 statements: A4Inclusion, A4Complete
   EffectQueueLaws.lean the queue laws Q1–Q3 as theorems (SB1)
   SimRelation.lean   the relation behind a4_inclusion: linearization points, corrSub, Rel, RelHist
+  RtWitnesses.lean   non-vacuity witnesses and empty-list guards for the B1 frozen statements (P6a)
 Main.lean            the fixture exporter
 ```
 

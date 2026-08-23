@@ -43,6 +43,7 @@ still owes — and paying it at the end of the fan-out.
 | `SimRelation.lean` | `pointPassed`, `owedOp`, `corrSub`, `corrOn`, `OwedOk`, `Rel`, `RelHist` — the relation as definitions (proof-side; reshapeable) | the target of P4b |
 | `ApplyLemmas.lean` | `lookupSub_updateSub_ne`, `applyPull_other`, `applyUnsubscribe_other`, `applyOp_publish_each`, `applyOp_delete_each`, `applyOp_other_frame`, `applyOp_error_frame` (proved 2026-08-23, P4a); `pullStep_third_none`, `pull_third_none` (proved 2026-08-23, T2) | the abstract independence lemmas; the at-most-two-returning-pulls bound P5 rests on |
 | `SimAgree.lean` | `AgreeAt`, `agreeAt_refl`, `agreeAt_symm`, `agreeAt_trans`, `applyPull_agreeAt`, `apply_agreeAt`, `observedOf_agreeAt` (proved 2026-08-23, P5a) | agreement at one subscriber: the helpers `a4_complete` uses to move other subscribers' pulls |
+| `RtWitnesses.lean` | `allSubTraces_count`, `allRtTraces_count`, `sb1_witness`, `sb3_witness`, `a4complete_witness`, `a4inclusion_witness` (proved 2026-08-23, P6a) | non-vacuity witnesses and empty-list guards for the B1 frozen statements |
 | `SimProof.lean` (to write) | the abstract independence lemmas, the relation's preservation, `a4_inclusion`, `a4_complete` | SB4, SB5 |
 
 Dependency order: `EffectQueue → Runtime → RtInvariants → RtTraces → Sim → EffectQueueLaws →
