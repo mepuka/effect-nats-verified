@@ -5,7 +5,7 @@
 union of the sections below (r1, r2, Stage A (r3.1), Stage B1 (r4)); the package holds 252
 source-level `theorem` declarations (`grep -h '^theorem' EffectNatsSubstrate/*.lean | wc -l`, the
 counting policy; the exhaustive axiom census `scripts/AxiomsAll.lean` sees 956 theorem constants
-including compiler-generated ones), of which the r4 obligations are not yet proved.
+including compiler-generated ones). **All r4/r4.2 obligations SB1–SB7 are proved (2026-08-23).**
 **Imports:** Lean core only (`leanprover/lean4:v4.33.0`); no Std/Batteries/Mathlib.
 **Semantic contract:** `research/2026-08-22-first-slice-jetstream-memory-lean-model.md`
 §3–§4 (corrected revision); transliteration pins `mepuka/effect-nats` @ `d06223f` (r1–r2.1) and

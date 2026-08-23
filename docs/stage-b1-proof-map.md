@@ -17,6 +17,11 @@
 
 ## 0. In plain terms
 
+**Status (2026-08-23): all seven obligations proved.** SB1 `EffectQueueLaws`; SB2 `RtCommute`
+(unconditional); SB3/SB6/SB7 `RtReachable` (through the auxiliary `FanAux`/`RtAux`); SB4
+`SimProof.a4_inclusion`; SB5 `SimComplete.a4_complete` (r4.2). Standard axioms only; the signature
+probe is byte-identical to the r4.2 baseline. The assurance review is the next gate.
+
 Stage A's theorems describe the subscriber machinery with whole actions; the runtime model
 (`Runtime.lean`) describes it with the small steps the program actually takes, and assumption
 A4 says the two agree. The proofs below make that a theorem. There are four layers: the queue's

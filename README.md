@@ -36,6 +36,24 @@ rolled-up messages, so that last statement is proved on a proof-only ledger of e
 publish (a history variable in the sense of Abadi and Lamport), with theorems showing the
 ledger changes no behaviour.
 
+The runtime layer (stage B1) models what actually runs: Effect's `Queue` (transliterated from
+its source, with `offer`/`takeAll`/`fail`/`shutdown`), one subscriber fiber per consumer, and a
+publish's fan-out as a sequence of per-subscriber `check`/`resolve` steps between which any
+consumer may pull, wake, or close. Its theorems (SB1–SB7) say: the queue laws the stage-A model
+assumed of the buffer hold of the transliterated queue (Q1–Q3 as theorems); a consumer's step and
+another subscriber's fan-out step commute, and two consumers' steps commute (with a kernel-checked
+witness that the *same* subscriber's pull and check do not — the linearization counterexample);
+the runtime invariant holds on every reachable runtime state and the sequential core is untouched
+by anything but an operation; and the two simulation theorems that retire the last named
+assumption, A4: **inclusion** — every runtime execution that ends with no fan-out in flight is
+matched by a stage-A label sequence with the same serial operations, the same per-subscriber chunk
+histories, and the same subscriber counts — and **completeness** — for a valid trace without
+unsubscribes, every runtime history of an existing subscriber is in the acceptance set the exporter
+prints (`historiesWith`), which is what the harness's free-running membership check rests on. The
+completeness statement was corrected twice after its freeze (r4.1: the trace must be valid; r4.2:
+the subscriber must exist); both refutations of the earlier forms are kept, kernel-checked, under
+`scripts/`.
+
 Witnesses accompany the theorems. Sixteen traces mirror the conformance cases of the
 TypeScript test suite and are checked by the kernel with `decide`; ten negative witnesses
 show which steps the model refuses; two deliberately wrong models — one-element pulls, and a
@@ -54,11 +72,15 @@ carrier restrictions (unique header keys; non-negative capacity), and replay of 
 traces. Replay evidence exists today for the sequential core; the subscriber traces are not
 yet exported in a form the harness can run.
 
-Four facts about the runtime are assumed, named, and not proved here. Q1: a pull drains the
-whole buffer. Q2: failing a queue delivers its buffer before the error. Q3: shutdown discards
-the buffer. A4: the model places whole pulls between whole operations, while the runtime can
-schedule a consumer's pull inside a publish's fan-out; for `TerminateOnLag` every such
-interleaving is assumed equivalent to one of the model's placements. Stage B discharges them.
+The four runtime facts stage A assumed — Q1: a pull drains the whole buffer; Q2: failing a
+queue delivers its buffer before the error; Q3: shutdown discards the buffer; A4: every
+interleaving of a consumer's pull with a publish's fan-out is equivalent to one of the model's
+placements — are now theorems of stage B1 (`EffectQueueLaws`, `SimProof`, `SimComplete`). What
+remains assumed is the transliteration itself: that `EffectQueue.lean` is Effect's `Queue` at
+rc.111 and `Runtime.lean` is the memory interpreter's subscriber machinery at the pin, which only
+replay can test. Stage B1's assurance review (specification, model, proof, implementation,
+deployment) is pending; until it is recorded under `docs/reviews/`, "proved" here means
+kernel-checked against the frozen statements, not reviewed.
 
 Out of scope: the `PullWindow` policy and its blocked state, the Effect `Queue` itself,
 acknowledgements, redelivery, durable consumers, and any claim about `nats-server` beyond what
@@ -66,15 +88,17 @@ a replay records.
 
 ## What comes next
 
-- Export the subscriber traces (fixture schema 2) and extend the effect-nats replay harness
-  to realise them, with a free-running consumer mode to test assumption A4 empirically.
-- An assurance review of the stage-A result across specification, model, proof,
-  implementation, and deployment assumptions.
-- Stage B: a model of Effect's `Queue` transliterated from its source, proofs of Q1–Q3, a
-  simulation from runtime steps to the model's labels that discharges A4, the `PullWindow`
-  policy, and liveness stated under a named fairness assumption.
-- A session-type pilot: the consume protocol as a binary session type checked against the
-  subscriber model, then a multiparty family over N subscribers.
+- The stage-B1 assurance review across specification, model, proof, implementation, and
+  deployment assumptions, with its Correct pass — the gate before any "verified" claim.
+- Hardening of the live conformance harness (no hollow traces, stale-override detection, a
+  comparator mutant self-check, an acceptance-set coverage report), and the export of the runtime
+  scenarios as fixtures.
+- A law layer over the parametric stage-A skeleton (`ApplyLaws`) and a refinement statement for
+  alternative representations of `deliver`/`pull` (L7b).
+- Stage B2: the `PullWindow` policy and its blocked state; liveness under a named fairness
+  assumption.
+- Stage C (separate track, documents only until B1 is reviewed): acknowledged consumers and
+  failure — consumer crash-stop first, with `AckWait` as a nondeterministic label.
 
 ## Run
 
