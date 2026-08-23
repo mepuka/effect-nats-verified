@@ -128,6 +128,8 @@ EffectNatsSubstrate/
   RtWitnesses.lean   non-vacuity witnesses and empty-list guards for the B1 frozen statements (P6a)
   ApplyLaws.lean     the laws stage A assumes of deliver/pull, and one theorem re-derived over them (L7a)
   SimPlaced.lean     the acceptance sets enumerate every enabled pull placement (stage-B1 P5b)
+  SimComplete.lean   the merge that turns a4_inclusion's witness into a pull placement of the
+                     trace's labels, and a4_complete_of_rtInv (stage-B1 P5c)
 Main.lean            the fixture exporter
 ```
 

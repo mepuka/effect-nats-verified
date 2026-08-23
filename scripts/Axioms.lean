@@ -404,3 +404,16 @@ open EffectNatsSubstrate
 #print axioms unsub_habs
 #print axioms unsub_hafter
 #print axioms updateRt_keys
+#print axioms a4_complete_of_rtInv
+#print axioms agreeExcept_symm
+#print axioms agreeExcept_trans
+#print axioms labelSerial_cons_serial
+#print axioms labelSerial_filter_pull
+#print axioms labelSerial_nil_mem
+#print axioms labelSerial_split
+#print axioms merge_placed
+#print axioms placed_keep_all
+#print axioms placed_refl
+#print axioms runLabels_agreeAt_other
+#print axioms runLabels_split
+#print axioms runLabels_strip_pulls
