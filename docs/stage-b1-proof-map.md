@@ -230,7 +230,14 @@ over `rls`, `labels`, `owed` and derive the frozen one; the frozen statement is 
 
 ### P5 — `a4_complete : A4Complete` (SB5)
 
-(S) `A4Complete`. (E) §2.5, from `a4_inclusion`'s witness; helper: `historiesFrom_contains_of_valid`
+(S) `A4Complete` **as of r4.1** (valid-trace hypothesis; the r4 form is refuted in
+`scripts/A4CompleteR4Refutation.lean`). The proof needs, from P4b, an auxiliary form of
+`a4_inclusion` whose witness `labels` contains only `.op`/`.register`/`.pull` labels when the run has
+no `closeA`/`closeB` (the frozen `A4Inclusion` does not say so) — P4b must prove and export that
+auxiliary statement. Then: other subscribers' pulls can be moved to the trace's positions without
+changing `id`'s history or any label's enabledness (`ApplyLemmas.lean`, a per-label "agree except at
+`j`" induction), and a valid placement of `id`'s pulls into `labelsWithoutPulls t id` with at most
+two consecutive (`pull_third_none`) is enumerated by `outcomesFrom`. (E) §2.5, from `a4_inclusion`'s witness; helper: `historiesFrom_contains_of_valid`
 (a valid label sequence of the trace's serial with `id`'s pulls inserted, at most two
 consecutively, is enumerated by `outcomesFrom`). **Required, not optional:** the "at most two returning pulls
 per abstract gap" bound that `pullsAtGap`'s fuel encodes (`SubPlacements.lean`) is proved as a

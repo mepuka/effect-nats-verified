@@ -82,16 +82,21 @@ def A4Inclusion : Prop :=
       (∀ stream, subscriberCount sA stream = subscriberCount (eraseRt s) stream)
 
 /-- **Completeness of the acceptance sets for the runtime model** (SB5; a Pass
-B candidate). For a fixture trace without `unsubscribe` labels, every runtime
-execution with the trace's serial sequence and no scope closures ends, at
-quiescence, with each registered subscriber's chunk history in the set the
-exporter prints for it (`historiesWith apply t id`, the enumeration behind
-`freeRunning.outcomes`). This is the theorem the harness's free-running
-membership check rests on. Scope closures and the one trace with
-`unsubscribe` labels (`sa-accounting`, whose subscribers never pull) are
-outside it by hypothesis. -/
+B candidate; **r4.1**). For a *valid* stage-A trace (`runLabels` accepts its
+labels as written) without `unsubscribe` labels, every runtime execution with
+the trace's serial sequence and no scope closures ends, at quiescence, with
+each registered subscriber's chunk history in the set the exporter prints for
+it (`historiesWith apply t id`, the enumeration behind `freeRunning.outcomes`).
+This is the theorem the harness's free-running membership check rests on.
+Scope closures and the one trace with `unsubscribe` labels (`sa-accounting`,
+whose subscribers never pull) are outside it by hypothesis. The validity
+hypothesis was missing in r4: `outcomesFrom` drops a placement at a disabled
+label of *another* subscriber, so an invalid trace (a pull on an empty buffer)
+has an empty acceptance set — `scripts/A4CompleteR4Refutation.lean` proves
+`¬ A4CompleteR4` for the r4 form. -/
 def A4Complete : Prop :=
   ∀ (t : SubTrace),
+    (runLabels initialSub (t.steps.map (·.label))).isSome = true →
     t.steps.all (fun st => match st.label with | .unsubscribe _ => false | _ => true) = true →
     ∀ (rls : List RtLabel) (s : RtState),
       runRtSteps initialRt rls = some s → s.fanOut = none →
