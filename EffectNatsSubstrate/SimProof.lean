@@ -3,6 +3,7 @@ import EffectNatsSubstrate.ApplyLemmas
 import EffectNatsSubstrate.SimAgree
 import EffectNatsSubstrate.EffectQueueLaws
 import EffectNatsSubstrate.RtInvariants
+import EffectNatsSubstrate.RtReachable
 import EffectNatsSubstrate.RtList
 
 /-!
@@ -23,23 +24,6 @@ passed). `endFanOut` pays the IOU; extraction at a quiescent state reads the wit
 namespace EffectNatsSubstrate
 
 /-! ## Runtime association lists -/
-
-theorem mem_of_lookupRt : ∀ (l : List (SubId × RtSubscriber)) (id : SubId) (r : RtSubscriber),
-    lookupRt l id = some r → (id, r) ∈ l := by
-  intro l
-  induction l with
-  | nil => intro id r h; cases h
-  | cons p rest ih =>
-    obtain ⟨i, sub⟩ := p
-    intro id r h
-    simp only [lookupRt] at h
-    by_cases hi : i = id
-    · rw [if_pos hi] at h
-      cases h
-      cases hi
-      exact List.Mem.head _
-    · rw [if_neg hi] at h
-      exact List.Mem.tail _ (ih id r h)
 
 theorem lookupSub_updateSub_map : ∀ (subs : List (SubId × Subscriber)) (id : SubId)
     (f : Subscriber → Subscriber),
@@ -1635,29 +1619,6 @@ theorem lookupRt_none_of_fresh :
     have hjk : j ≠ k := h (j, sub) List.mem_cons_self
     simp only [lookupRt, if_neg hjk]
     exact ih k (fun q hq => h q (List.mem_cons_of_mem _ hq))
-
-theorem lookupRt_of_mem_pairwise :
-    ∀ (l : List (SubId × RtSubscriber)) (k : SubId) (r : RtSubscriber),
-      (l.map Prod.fst).Pairwise (· < ·) → (k, r) ∈ l → lookupRt l k = some r := by
-  intro l
-  induction l with
-  | nil => intro k r _ h; cases h
-  | cons p rest ih =>
-    obtain ⟨j, sub⟩ := p
-    intro k r hp h
-    rw [List.map_cons, List.pairwise_cons] at hp
-    obtain ⟨hlt, hrest⟩ := hp
-    rcases List.mem_cons.mp h with heq | hmem
-    · cases heq
-      simp [lookupRt]
-    · have hjk : j ≠ k := by
-        intro hj
-        have hmemk : k ∈ rest.map Prod.fst := List.mem_map.mpr ⟨(k, r), hmem, rfl⟩
-        have := hlt k hmemk
-        rw [hj] at this
-        exact Nat.lt_irrefl _ this
-      simp only [lookupRt, if_neg hjk]
-      exact ih k r hrest hmem
 
 /-! ## The core step of a deletion -/
 
@@ -3673,6 +3634,15 @@ theorem a4_inclusion_pullOnly_of_rtInv
   | register _ _ _ _ _ => rfl
   | pull _ => rfl
   | unsubscribe j => exact absurd rfl (hnu _ hl j)
+
+
+/-! ## The frozen statement -/
+
+/-- **A4 as trace inclusion at quiescent points** (SB4), closed: `a4_inclusion_of_rtInv` needed
+one fact about reachable runtime states, and `rtInv_reachable` (P2) is it. -/
+theorem a4_inclusion : A4Inclusion :=
+  a4_inclusion_of_rtInv
+    (fun rls _s hrun => rtInv_reachable (reachableRt_of_run rls ReachableRt.init hrun))
 
 
 end EffectNatsSubstrate

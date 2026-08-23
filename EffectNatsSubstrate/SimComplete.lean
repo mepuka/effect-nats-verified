@@ -1,5 +1,6 @@
 import EffectNatsSubstrate.SimProof
 import EffectNatsSubstrate.SimPlaced
+import EffectNatsSubstrate.RtReachable
 
 /-!
 # `a4_complete` — the runtime histories are enumerated (stage B1, packet P5c)
@@ -415,6 +416,15 @@ theorem a4_complete_of_rtInv
       (by have hr : runLabels initialSub (labelsWithoutPulls t id) = some sL := hsL
           rw [hr]; rfl)
   exact List.elem_eq_true_of_mem (historiesFrom_contains hfree hpl hrunP)
+
+
+/-! ## The frozen statement -/
+
+/-- **Completeness of the acceptance sets for the runtime model** (SB5, r4.2), closed:
+`a4_complete_of_rtInv` needed the same one fact, and `rtInv_reachable` (P2) is it. -/
+theorem a4_complete : A4Complete :=
+  a4_complete_of_rtInv
+    (fun rls _s hrun => rtInv_reachable (reachableRt_of_run rls ReachableRt.init hrun))
 
 
 end EffectNatsSubstrate
