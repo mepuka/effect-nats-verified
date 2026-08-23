@@ -102,9 +102,9 @@ needed: `lookupRt_updateRt_ne : i ≠ j → lookupRt (updateRt l j f) i = lookup
 | `check i`, `resolve i` | nothing | internal |
 | `endFanOut` | the owed `op`, then the owed suffix (pulls and unsubscribes of visited subscribers, in runtime order) | pays the IOU |
 | `op` (other), `register` | the same label | immediately |
-| `pull j` / `wake j` returning a chunk or the exit | `pull j` — **immediately** if no fan-out is in flight or `j` is not yet visited (`j ∈ remaining` or decided-unresolved); **owed** if `j` was visited | |
+| `pull j` / `wake j` returning a chunk or the exit | `pull j` — **immediately** if no fan-out is in flight or `j`'s linearization point has not passed (`j ∈ remaining`, or `decided = some (j, false)`: an admit decision is linearized at its `resolve`); **owed** if it has (`j ∈ visited`, or `decided = some (j, true)`: an overflow decision is linearized at its `check`, the stale `size` read being the abstract overflow test) | corrected 2026-08-23 (overwatch T7, `research/logs/rt_probe10.lean`: `RtTraces.caseBetween` falsifies the "visited" rule) |
 | `pull j` parking | nothing | internal |
-| `closeA j` | `unsubscribe j` — immediately / owed by the same rule | the `Set` delete is the count change; matching here is what makes the count conjunct hold between the two close steps |
+| `closeA j` | `unsubscribe j` — **immediately**, whichever side of a fan-out it lands on (measured: both placements are witnesses, because `closeStarted` freezes `j`'s history — overwatch T8) | the `Set` delete is the count change; matching here is what makes the count conjunct hold between the two close steps |
 | `closeB j` | nothing | internal |
 
 **The relation.** `Rel (s : RtState) (labels owed : List Label) : Prop` with `sPre := runLabels
@@ -115,8 +115,8 @@ initialSub labels` (the abstract state *before* the owed publish):
 - if `s.fanOut = none`: `owed = []` and **per subscriber** `corr s sA id` (below);
 - if `s.fanOut = some f` with `f.kind = publish stream m el`: `owed = .op (publish …) (.ok
   (.sequence m.sequence)) :: suffix` where `suffix` holds only `pull`/`unsubscribe` labels of
-  subscribers in `f.visited`; for `j ∈ f.remaining` or `f.decided = some (j, _)`:
-  `corr s sA j` (pre-publish); for `(i, _) ∈ f.visited`: `corr s sPost i` where `sPost` is
+  subscribers whose point has passed; for `j ∈ f.remaining` or `f.decided = some (j, false)`:
+  `corr s sA j` (pre-publish); for `(i, _) ∈ f.visited` or `f.decided = some (i, true)`: `corr s sPost i` where `sPost` is
   `runLabels sA ([owed publish] ++ (suffix restricted to i))`; `f.remaining ++ (f.decided ids) ++
   (f.visited ids)` is exactly the abstract publish's fan-out set of `sA` (registered, stream,
   filters) — so the abstract publish at `endFanOut` visits the same subscribers with the same
@@ -134,11 +134,12 @@ false` (the runtime queue may still hold a buffer nobody can take — E5); other
 definition, the history clause implies the `observed` equality.
 
 **Why the owed suffix is sound** — the abstract publish applied at `endFanOut` to `sA` makes,
-for each visited `i`, the same decision the runtime's `check i` made: `check` read `size` of the
-runtime queue at the time, which equals the abstract buffer length of `i` in `sA` (`corr` held
-for `i` while unvisited), and no other label changed `i`'s buffer in between (a pull of `i`
-after its visit is *owed*, so it is applied after the abstract publish; a pull of `i` before its
-visit was matched immediately and is in `labels`, hence in `sA`). The abstract independence lemmas
+for each subscriber `i` past its point, the same decision the runtime made: for an overflow,
+`check i` read `size` equal to the abstract buffer length of `i` in `sA` (`corr` held until the
+check) and nothing the runtime did to `i` afterwards is reflected in `sA` (its later pulls are
+owed); for an admit, the offer at `resolve i` appended to a buffer equal to `sA`'s (`corr` held
+until the resolve — a pull of `i` between the admit `check` and its `resolve` is matched
+immediately, shrinking both buffers alike, and `decidedRoom` keeps the admit valid). The abstract independence lemmas
 make the per-subscriber bookkeeping local (§3, packet P4a).
 
 **Per-label preservation of `Rel`** is the induction step; **extraction** at a quiescent state
