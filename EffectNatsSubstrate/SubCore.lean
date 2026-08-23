@@ -268,4 +268,28 @@ theorem SubInv.of_stream_lookup {s s' : SubState} {sub : Subscriber} (hinv : Sub
   obtain ⟨st₁, hl', hle⟩ := hcore hr _ hl
   exact ⟨st₁, hl', Nat.lt_of_lt_of_le hlt hle⟩
 
+/-- A drain: the buffer emptied into `observed`, with the status and registration flag possibly
+changed. Every clause discharges from the old invariant plus where the entries went; the three
+`pullStep` success arms are its instances. -/
+theorem SubInv.pulled {s : SubState} {sub sub' : Subscriber} (hinv : SubInv s sub)
+    (hempty : sub'.pending = []) (hpol : sub'.policy = sub.policy)
+    (hlast : sub'.lastEnqueued = sub.lastEnqueued)
+    (hvis : entrySequences (visible sub') = entrySequences (visible sub))
+    (hopen : sub'.registered = true → sub'.status = .opened)
+    (hclosing : ∀ e, sub'.status ≠ .closing e)
+    (hshut : sub'.status = .shutDown → sub'.registered = false)
+    (hstream : sub'.registered = true → ∃ st₀, lookupStream s.core sub'.stream = some st₀ ∧
+      sub'.lastEnqueued < st₀.nextSequence) :
+    SubInv s sub' := by
+  refine ⟨?_, ?_, hopen, hstream, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  · rw [hpol]; exact hinv.capacityPos
+  · rw [hempty]; exact Nat.zero_le _
+  · intro e he; exact absurd he (hclosing e)
+  · intro _ _; exact hempty
+  · intro he; exact ⟨hshut he, hempty⟩
+  · intro m hm; rw [hempty] at hm; cases hm
+  · rw [hvis]; exact hinv.visibleStrict
+  · intro n hn; rw [hvis] at hn; rw [hlast]; exact hinv.visibleBound n hn
+  · intro hcon; rw [hempty] at hcon; exact absurd rfl hcon
+
 end EffectNatsSubstrate

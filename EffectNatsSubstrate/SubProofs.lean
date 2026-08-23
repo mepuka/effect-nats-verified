@@ -167,64 +167,35 @@ theorem pullStep_inv {s : SubState} {sub sub' : Subscriber} (hinv : SubInv s sub
     have hpend : sub.pending = [] := hinv.doneEmpty e hst
     have hreg : sub.registered = false :=
       registered_false_of_status hinv (by rw [hst]; intro h'; cases h')
-    have hvis : entrySequences (visible { sub with observed := sub.observed ++ [.failed e],
-                                                   status := .shutDown })
-        = entrySequences (visible sub) := entrySequences_visible_fail sub e
-    constructor
-    · exact hinv.capacityPos
-    · exact hinv.capacity
-    · intro hr; have hr' : sub.registered = true := hr; simp [hreg] at hr'
-    · intro hr; have hr' : sub.registered = true := hr; simp [hreg] at hr'
-    · intro e' h'; cases h'
-    · intro e' h'; cases h'
-    · intro _; exact ⟨hreg, hpend⟩
-    · exact hinv.pendingMatch
-    · rw [hvis]; exact hinv.visibleStrict
-    · intro n hn; rw [hvis] at hn; exact hinv.visibleBound n hn
-    · intro h'; exact absurd hpend h'
+    exact SubInv.pulled hinv hpend rfl rfl (entrySequences_visible_fail sub e)
+      (fun hr => absurd hr (by simp [hreg])) (fun _ he => by simp at he) (fun _ => hreg)
+      hinv.registeredStream
   · rename_i hst
     split at h
     · cases h
-    · rename_i hne
-      cases h
-      have hvis : entrySequences (visible { sub with observed := sub.observed ++ sub.pending.map Observed.entry,
-                                                     pending := [] })
-          = entrySequences (visible sub) := congrArg entrySequences (visible_drain sub)
-      constructor
-      · exact hinv.capacityPos
-      · exact Nat.zero_le _
-      · intro hr; have hr' : sub.registered = true := hr; exact hinv.registeredOpen hr'
-      · intro hr; have hr' : sub.registered = true := hr; exact hinv.registeredStream hr'
-      · intro e' h'; have h'' : sub.status = .closing e' := h'; simp [hst] at h''
-      · intro e' h'; have h'' : sub.status = .done e' := h'; simp [hst] at h''
-      · intro h'; have h'' : sub.status = .shutDown := h'; simp [hst] at h''
-      · intro m hm; cases hm
-      · rw [hvis]; exact hinv.visibleStrict
-      · intro n hn; rw [hvis] at hn; exact hinv.visibleBound n hn
-      · intro h'; exact absurd rfl h'
+    · cases h
+      refine SubInv.pulled hinv rfl rfl rfl (congrArg entrySequences (visible_drain sub))
+        hinv.registeredOpen ?_ ?_ hinv.registeredStream
+      · intro e' he'
+        have h'' : sub.status = .closing e' := he'
+        simp [hst] at h''
+      · intro h'
+        have h'' : sub.status = .shutDown := h'
+        simp [hst] at h''
   · rename_i e hst
     split at h
     · cases h
-    · rename_i hne
-      cases h
+    · cases h
       have hreg : sub.registered = false :=
         registered_false_of_status hinv (by rw [hst]; intro h'; cases h')
-      have hvis : entrySequences (visible { sub with observed := sub.observed ++ sub.pending.map Observed.entry,
-                                                     pending := [], status := .done e })
-          = entrySequences (visible sub) :=
-        congrArg entrySequences (visible_drain_done sub e)
-      constructor
-      · exact hinv.capacityPos
-      · exact Nat.zero_le _
-      · intro hr; have hr' : sub.registered = true := hr; simp [hreg] at hr'
-      · intro hr; have hr' : sub.registered = true := hr; simp [hreg] at hr'
-      · intro e' h'; cases h'
-      · intro e' _; rfl
-      · intro h'; cases h'
-      · intro m hm; cases hm
-      · rw [hvis]; exact hinv.visibleStrict
-      · intro n hn; rw [hvis] at hn; exact hinv.visibleBound n hn
-      · intro h'; exact absurd rfl h'
+      refine SubInv.pulled hinv rfl rfl rfl (congrArg entrySequences (visible_drain_done sub e))
+        (fun hr => absurd hr (by simp [hreg])) ?_ ?_ hinv.registeredStream
+      · intro e' he'
+        have h'' : QueueStatus.done e = .closing e' := he'
+        simp at h''
+      · intro h'
+        have h'' : QueueStatus.done e = .shutDown := h'
+        simp at h''
 
 theorem unsubscribe_inv {s : SubState} {sub : Subscriber} (hinv : SubInv s sub) :
     SubInv s { sub with registered := false, pending := [], status := .shutDown } := by
