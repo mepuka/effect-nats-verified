@@ -267,6 +267,27 @@ theorem deliverOne_skip {stream : StreamName} {m : StoredMessage} {sub : Subscri
   unfold deliverOne
   rw [if_neg (by simp [hcond])]
 
+/-- On overflow the buffer is non-empty (`capacityPos`), so the failure is `closing`,
+not `done` — the drain-first discipline of Q2. -/
+theorem deliverOne_overflow_closing {s : SubState} {stream : StreamName} {m : StoredMessage}
+    {sub : Subscriber} {n : Nat} (hinv : SubInv s sub)
+    (hcond : (sub.stream == stream && sub.registered && matchesAny sub.filters m.subject) = true)
+    (hpol : sub.policy = .terminateOnLag n) (hfull : n ≤ sub.pending.length) :
+    deliverOne stream m sub =
+      { sub with registered := false,
+                 status := .closing (.consumerLagged stream sub.lastEnqueued) }
+    ∧ sub.pending ≠ [] := by
+  have hcapPos : 1 ≤ sub.policy.capacity := hinv.capacityPos
+  rw [hpol] at hcapPos
+  simp only [Policy.capacity] at hcapPos
+  have hne : sub.pending ≠ [] := fun hnil => by
+    rw [hnil] at hfull
+    simp at hfull
+    omega
+  have hempty : sub.pending.isEmpty = false := List.isEmpty_eq_false_iff.mpr hne
+  refine ⟨?_, hne⟩
+  rw [deliverOne_overflow hcond hpol hfull, if_neg (by rw [hempty]; decide)]
+
 theorem endOne_skip {name : StreamName} {sub : Subscriber}
     (hcond : (sub.stream == name && sub.registered) = false) : endOne name sub = sub := by
   unfold endOne
@@ -288,21 +309,9 @@ theorem deliverOne_inv {s s' : SubState} {stream : StreamName} {st : StreamState
     cases hl₀
     cases hpol : sub.policy with
     | terminateOnLag n =>
-      have hcapPos : 1 ≤ sub.policy.capacity := hinv.capacityPos
-      rw [hpol] at hcapPos
-      simp only [Policy.capacity] at hcapPos
       by_cases hfull : n ≤ sub.pending.length
-      · rw [deliverOne_overflow hcond hpol hfull]
-        have hne : sub.pending ≠ [] := by
-          intro hnil
-          rw [hnil] at hfull
-          simp at hfull
-          omega
-        have hempty : sub.pending.isEmpty = false := by
-          cases hp : sub.pending with
-          | nil => exact absurd hp hne
-          | cons _ _ => rfl
-        rw [if_neg (by rw [hempty]; decide)]
+      · obtain ⟨heq, hne⟩ := deliverOne_overflow_closing hinv hcond hpol hfull
+        rw [heq]
         refine ⟨hinv.capacityPos, hinv.capacity, ?_, ?_, ?_, ?_, ?_, hinv.pendingMatch,
           hinv.visibleStrict, hinv.visibleBound, hinv.pendingLast⟩
         · intro hr; cases hr

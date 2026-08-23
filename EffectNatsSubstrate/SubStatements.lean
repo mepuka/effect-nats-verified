@@ -322,32 +322,21 @@ theorem lagInv_deliverOne {s : SubState} {stream : StreamName} {m : StoredMessag
       simp only [Bool.and_eq_true] at hc
       exact hc.1.2
     have ho : sub.status = .opened := hinv.registeredOpen hreg
-    have hcapPos := hinv.capacityPos
     cases hpol : sub.policy with
     | terminateOnLag n =>
-      rw [hpol] at hcapPos
-      simp only [Policy.capacity] at hcapPos
       by_cases hfull : n ≤ sub.pending.length
-      · rw [deliverOne_overflow hcond hpol hfull]
-        have hne : sub.pending ≠ [] := by
-          intro hnil
-          rw [hnil] at hfull
-          simp at hfull
-          omega
-        have hempty : sub.pending.isEmpty = false := List.isEmpty_eq_false_iff.mpr hne
+      · obtain ⟨heq, _hne⟩ := deliverOne_overflow_closing hinv hcond hpol hfull
+        rw [heq]
         refine ⟨?_, ?_, ?_⟩
         · intro stream' n' h
-          have h' : (if sub.pending.isEmpty then QueueStatus.done (.consumerLagged stream sub.lastEnqueued)
-              else .closing (.consumerLagged stream sub.lastEnqueued))
+          have h' : QueueStatus.closing (.consumerLagged stream sub.lastEnqueued)
               = .closing (.consumerLagged stream' n') := h
-          rw [hempty, if_neg Bool.false_ne_true] at h'
-          cases h'
-          rfl
+          injection h' with h1
+          injection h1 with _ hn'
+          exact hn'.symm
         · intro stream' n' h
-          have h' : (if sub.pending.isEmpty then QueueStatus.done (.consumerLagged stream sub.lastEnqueued)
-              else .closing (.consumerLagged stream sub.lastEnqueued))
+          have h' : QueueStatus.closing (.consumerLagged stream sub.lastEnqueued)
               = .done (.consumerLagged stream' n') := h
-          rw [hempty, if_neg Bool.false_ne_true] at h'
           cases h'
         · intro stream' n' h
           exact hl.failedLag stream' n' h
