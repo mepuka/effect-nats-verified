@@ -256,9 +256,8 @@ theorem delete_ends {s : SubState} {name : StreamName} {s' : SubState} {id : Sub
   simp only [afterOp] at ha
   rw [lookupSub_map, hb] at ha
   obtain rfl := (Option.some.inj ha).symm
-  unfold endOne
   have hcond : (sub.stream == name && sub.registered) = true := by simp [hs, hr]
-  rw [if_pos hcond]
+  rw [endOne_end hcond]
   refine ⟨rfl, ?_, rfl⟩
   dsimp only
   split
@@ -355,9 +354,9 @@ theorem lagInv_deliverOne {s : SubState} {stream : StreamName} {m : StoredMessag
 
 theorem lagInv_endOne {name : StreamName} {sub : Subscriber} (hl : LagInv sub) :
     LagInv (endOne name sub) := by
-  unfold endOne
-  split
-  · refine ⟨?_, ?_, ?_⟩
+  by_cases hcond : (sub.stream == name && sub.registered) = true
+  · rw [endOne_end hcond]
+    refine ⟨?_, ?_, ?_⟩
     · intro stream' n' h
       have h' : (if sub.pending.isEmpty then QueueStatus.done (.streamNotFound name)
           else .closing (.streamNotFound name)) = .closing (.consumerLagged stream' n') := h
@@ -368,7 +367,8 @@ theorem lagInv_endOne {name : StreamName} {sub : Subscriber} (hl : LagInv sub) :
       split at h' <;> cases h'
     · intro stream' n' h
       exact hl.failedLag stream' n' h
-  · exact hl
+  · rw [endOne_skip (by simpa using hcond)]
+    exact hl
 
 theorem lagInv_pullStep {s : SubState} {sub sub' : Subscriber} (hinv : SubInv s sub)
     (hl : LagInv sub) (h : pullStep sub = some sub') : LagInv sub' := by

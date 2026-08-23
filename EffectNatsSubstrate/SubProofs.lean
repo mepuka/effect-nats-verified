@@ -293,6 +293,15 @@ theorem endOne_skip {name : StreamName} {sub : Subscriber}
   unfold endOne
   rw [if_neg (by simp [hcond])]
 
+/-- The positive face of `endOne`: de-registration with the drain-then-fail status. -/
+theorem endOne_end {name : StreamName} {sub : Subscriber}
+    (hcond : (sub.stream == name && sub.registered) = true) : endOne name sub =
+      { sub with registered := false,
+                 status := if sub.pending.isEmpty then .done (.streamNotFound name)
+                           else .closing (.streamNotFound name) } := by
+  unfold endOne
+  rw [if_pos hcond]
+
 theorem deliverOne_inv {s s' : SubState} {stream : StreamName} {st : StreamState}
     {m : StoredMessage} {sub : Subscriber} (hinv : SubInv s sub)
     (hl : lookupStream s.core stream = some st) (hseq : m.sequence = st.nextSequence)
@@ -367,11 +376,8 @@ theorem endOne_inv {s s' : SubState} {name : StreamName} {sub : Subscriber} (hin
     (hcore : ∀ n st₀, n ≠ name → lookupStream s.core n = some st₀ →
       lookupStream s'.core n = some st₀) :
     SubInv s' (endOne name sub) := by
-  unfold endOne
-  split
-  · rename_i hcond
-    simp only [Bool.and_eq_true, beq_iff_eq] at hcond
-    obtain ⟨hstream, hreg⟩ := hcond
+  by_cases hcond : (sub.stream == name && sub.registered) = true
+  · rw [endOne_end hcond]
     refine ⟨hinv.capacityPos, hinv.capacity, ?_, ?_, ?_, ?_, ?_, hinv.pendingMatch,
       hinv.visibleStrict, hinv.visibleBound, hinv.pendingLast⟩
     · intro hr; cases hr
@@ -392,14 +398,13 @@ theorem endOne_inv {s s' : SubState} {name : StreamName} {sub : Subscriber} (hin
       have h' : (if sub.pending.isEmpty then QueueStatus.done (.streamNotFound name)
                   else .closing (.streamNotFound name)) = .shutDown := h
       split at h' <;> cases h'
-  · rename_i hcond
+  · rw [endOne_skip (by simpa using hcond)]
     refine SubInv.of_stream_lookup hinv ?_
-    intro hreg st₀ hl
+    intro hr st₀ hl
     have hne : sub.stream ≠ name := by
       intro heq
       apply hcond
-      simp only [Bool.and_eq_true, beq_iff_eq]
-      exact ⟨heq, hreg⟩
+      simp [heq, hr]
     exact ⟨st₀, hcore _ _ hne hl, Nat.le_refl _⟩
 
 end EffectNatsSubstrate

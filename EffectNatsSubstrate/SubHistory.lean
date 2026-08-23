@@ -273,8 +273,7 @@ theorem histInv_delete {sH : SubStateH} {name : StreamName} {core' : JSState} {r
       | true =>
         exfalso
         have hfalse : (endOne name q.2).registered = false := by
-          unfold endOne
-          rw [if_pos hc]
+          rw [endOne_end hc]
         rw [hfalse] at hreg
         cases hreg
       | false =>
@@ -284,12 +283,10 @@ theorem histInv_delete {sH : SubStateH} {name : StreamName} {core' : JSState} {r
       cases hc : (q.2.stream == name && q.2.registered) with
       | true =>
         have hv : visible (endOne name q.2) = visible q.2 := by
-          unfold endOne
-          rw [if_pos hc]
-          rfl
+          rw [endOne_end hc]
+          simp [visible]
         have hs : (endOne name q.2).stream = q.2.stream := by
-          unfold endOne
-          rw [if_pos hc]
+          rw [endOne_end hc]
         rw [hv] at hm
         rw [hs]
         exact hent m hm
