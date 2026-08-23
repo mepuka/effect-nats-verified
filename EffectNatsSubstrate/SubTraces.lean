@@ -119,6 +119,8 @@ def runSubTraceW2 : SubTrace → Bool := runSubTraceWith (applyWith deliverOneW2
 
 /-! ## Helpers for the traces -/
 
+namespace SATrace
+
 def roomy : Policy := .terminateOnLag 4096
 
 def opts (filters : List SubjectName) (start : StartPosition) (buffer : Policy := roomy) :
@@ -139,8 +141,13 @@ def reg (stream : String) (o : ConsumeOptions) (l₀ : StreamSeq) (id : SubId)
     (events : List Observed) (counts : List (StreamName × Nat) := []) : SubTraceStep :=
   { label := .register stream o l₀ id (.ok .unit), events := events, counts := counts }
 
-def pullE (id : SubId) (events : List Observed) : SubTraceStep :=
-  { label := .pull id, events := events }
+def pullE (id : SubId) (events : List Observed)
+    (counts : List (StreamName × Nat) := []) : SubTraceStep :=
+  { label := .pull id, events := events, counts := counts }
+
+end SATrace
+
+open SATrace
 
 /-! ## The traces -/
 
@@ -309,7 +316,7 @@ def saDrain : SubTrace :=
       , pub "KV_b" "$KV.b.k" "v3" 3 3
       , pub "KV_b" "$KV.b.k" "v4" 4 4
       , pullE 0 [.entry (msg "$KV.b.k" 3 "v3" 3), .entry (msg "$KV.b.k" 4 "v4" 4)]
-          |> fun t => { t with counts := [("KV_b", 1)] } ]
+          [("KV_b", 1)] ]
     finalObserved :=
       [ (0, [ .caughtUp, .entry (msg "$KV.b.k" 1 "v1" 1), .entry (msg "$KV.b.k" 2 "v2" 2)
             , .entry (msg "$KV.b.k" 3 "v3" 3), .entry (msg "$KV.b.k" 4 "v4" 4) ]) ] }
