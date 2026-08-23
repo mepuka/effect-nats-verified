@@ -17,8 +17,15 @@ It separates three questions:
    retention, T7 subject binding);
 3. what a recorded history looks like against the model (`Traces` — eight traces as data,
    each a list of steps with expected outcomes plus views of the final state, kernel-checked
-   with `decide`; `Main.lean` prints them as the JSON fixture the effect-nats suite replays
-   against the memory interpreter and the live server).
+   with `decide`; `Main.lean` prints them as a JSON fixture, which effect-nats replays against
+   the memory interpreter and the live server from its commit `872bd7f` on —
+   `test/LeanTraceReplay.ts`, a later pin than this package's transliteration pin `d06223f`).
+
+A trace's `mirrors` list names the conformance cases whose behaviors its steps instantiate; it
+is evidence metadata that `runTrace` never reads, and the `config-order` probe carries none.
+Fidelity to the TypeScript interpreter is claimed only under the seam's declared carrier
+restrictions — unique header keys (the seam's `ReadonlyMap`; the model's lookup is first-match)
+and non-negative capacity — and only as compatibility on replayed histories.
 
 Deliberately small: no subscribers, no consume/buffer policies, no JSONL trace ingestion, no
 `.nuscr` printer — deferred until the pending/pull subscriber semantics are frozen (proposal

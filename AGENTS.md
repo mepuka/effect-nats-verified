@@ -11,13 +11,16 @@ document, never the other way around.
   scope, obligations, and deferrals. A change to the model's scope or theorem statements
   starts as a correction to that document, not as an edit here.
 - **Citation root.** Module headers cite `src/…` and `test/…` paths meaning
-  `mepuka/effect-nats` @ `d06223f`. Transliteration is line-by-line against that pin; when
-  the pin moves, re-diff `Subject`/`State`/`Step` against the TS sources before touching any
-  proof.
+  `mepuka/effect-nats` @ `d06223f`. Transliteration is line-by-line against that pin under
+  the declared carrier restrictions (unique header keys — the seam's `ReadonlyMap` — and
+  non-negative capacity; proposal §3.1): an input outside them is not a claim about the seam.
+  When the pin moves, re-diff `Subject`/`State`/`Step` against the TS sources before touching
+  any proof.
 - **Elaboration is not fidelity.** A successful Lean elaboration proves the stated
   proposition, not that the proposition models the intended system. The model-fidelity
   boundary is the transliteration diff plus, later, trace replay — compatibility on recorded
-  histories, never "equivalence".
+  histories, never "equivalence". A trace's `mirrors` labels are unchecked metadata, not
+  evidence.
 - **Deferred means absent.** Subscribers, `consume`, buffer policies, `unsubscribe`, JSONL
   trace ingestion, payload hashing, `.nuscr` printing: not modeled, not stubbed. They enter
   only through a new slice document that freezes the pending/pull subscriber semantics

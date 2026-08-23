@@ -1,7 +1,8 @@
 # Signature snapshot — public proof surface
 
-**Snapshot:** 2026-08-22, revision 2 — second slice (T3–T7) frozen over the first slice
-(T1/T2).
+**Snapshot:** 2026-08-22, revision 2.1 — second slice (T3–T7) frozen over the first slice
+(T1/T2); r2.1 restates the traces as data (revision log). 31 frozen declarations below; the
+package holds 76 non-private theorems in all.
 **Imports:** Lean core only (`leanprover/lean4:v4.33.0`); no Std/Batteries/Mathlib.
 **Semantic contract:** `research/2026-08-22-first-slice-jetstream-memory-lean-model.md`
 §3–§4 (corrected revision); transliteration pin `mepuka/effect-nats` @ `d06223f`.
@@ -25,6 +26,12 @@ proof bodies and proved helper lemmas may change freely.
   `rejectedTraceChecks`, `pruneRollupTraceChecks` are gone, their content redistributed). No
   T1–T7 statement changed. `Main.lean` (`lake exe effect_nats_traces`) prints `allTraces` as
   the deterministic replay fixture; it is the only module importing `Lean`.
+- **r2.1 errata** (2026-08-22, Correct pass after
+  `research/2026-08-22-effect-nats-substrate-vp1.md`): `configOrderTrace.mirrors` is `[]` — the
+  trace mirrors no conformance case (C1 never permutes `subjects`); `mirrors` is metadata
+  `runTrace` does not read. No statement changed. The header carrier's unique-key restriction
+  is declared in the proposal (§3.1) rather than modeled: `headerLookup` is first-match, the
+  seam's `ReadonlyMap` has one value per key.
 
 ## Carriers and transitions
 
@@ -41,7 +48,7 @@ def validate : RawStreamConfig → Except ConfigError StreamConfig
 def ConfigEq (a b : StreamConfig) : Prop   -- order-sensitive structural equality
 def canonicalize : StreamConfig → StreamConfig   -- defined, unused by step
 
-structure StoredMessage
+structure StoredMessage    -- headers : List (String × String); unique keys by seam contract
 structure StreamState
 abbrev JSState := List (StreamName × StreamState)
 def forSubject : List StoredMessage → SubjectName → List StoredMessage   -- r2: storage-order filter

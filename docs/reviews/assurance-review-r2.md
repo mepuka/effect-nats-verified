@@ -32,13 +32,18 @@
 - `lastSequenceFor` returns `0` for an empty subject exactly as `:148` does; the sentinel
   reading needs positivity of stored sequences, which is `seqPositive`, not an assumption.
 - The rollup gate and the CAS gate are checked in the implementation's order (`:139-152`);
-  `publish_ok_iff` states all four gates in that order. Probe: swapping the rollup and CAS
+  `publish_ok_iff` is the success conjunction and carries no order — the order is pinned by
+  the error-specific theorems. Probe: swapping the rollup and CAS
   gates changes which error a publish that fails both raises; `publish_rollup_denied` takes
   no CAS hypothesis, `publish_cas_mismatch` takes the rollup hypothesis — consistent with
   the order.
 - **F1 (model-mismatch, minor, confirmed, by design):** a negative `maxMessagesPerSubject`
   is "unlimited" in the implementation (`:166`) and a typed rejection in the model
   (`validate_rejects_negative`). Recorded in the proposal §3.1; not new in r2.
+- **F6 (model-mismatch, minor, found by `research/2026-08-22-effect-nats-substrate-vp1.md`
+  VP1-01):** `headerLookup` is first-match over `List (String × String)` while the seam's
+  `ReadonlyMap` has one value per key; a repeated key makes the two disagree. Declared as a
+  carrier restriction (proposal §3.1), not modeled.
 
 ### 2. Model → theorem
 

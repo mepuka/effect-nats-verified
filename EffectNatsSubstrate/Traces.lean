@@ -236,7 +236,7 @@ theorem delete_trace : runTrace deleteTrace = true := by decide
 
 def configOrderTrace : Trace :=
   { name := "config-order"
-    mirrors := ["C1"]
+    mirrors := []
     steps :=
       [ { op := .createStream { name := "KV_o", subjects := ["$KV.o.a.>", "$KV.o.b.>"],
                                 maxMessagesPerSubject := 0, allowRollup := true }
