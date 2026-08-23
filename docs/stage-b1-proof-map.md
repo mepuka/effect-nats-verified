@@ -345,6 +345,24 @@ law-free skeleton form of `SubStatements.afterOp_publish_sub` (`:31`).
 (A) gate green; the frozen statements untouched; the module in the root import list, in
 `scripts/Axioms.lean`, and in `README.md` "Layout".
 
+
+**Coordinator's correction at merge (overwatch round 6, `research/logs/rt_probe16.lean`).** The
+module's framing "W2 is law-abiding and excluded only by trace" is right about the *frame laws* but
+understates what already excludes W2: **W2 is refuted by a frozen stage-A theorem** — over the 102
+pool states satisfying `SubInv`'s state-independent clauses, `deliverOneW2` breaks
+`SubInv.pendingLast` (it sets `lastEnqueued := m.sequence` on the overflow branch while `pending`
+still ends below it), so `stateInv_reachable` (SA2) is false for W2. **W1 is the genuinely
+law-abiding wrong model**: it satisfies every frozen stage-A theorem (`pull_visible` is its `P7o`)
+and is discriminated only by the chunk-history acceptance set (`w1_outside_outcomes`). The laws that
+would exclude W1 — `drains_all`, `closing_drains_to_done` (round 6's P8/P9) — are queue fact Q1
+restated, not structural frame conditions, which is why L7a does not add them. Two cautions for any
+generic re-derivation: some facts the frozen theorems use are *invariants, not laws* ("a pull on
+`done e` grows `visible` by `[failed e]`" assumes `SubInv.doneEmpty` and is false as a law for
+both pull models; delivery preserves `SubInv` only under message freshness); and the skeleton does
+not parameterise `endOne`, so `delete_ends` cannot be re-derived generically — a scope limit. L7b's
+certificate for a replacement is therefore: the frame laws **and** `SubInv` preservation **and** the
+simulation against the acceptance sets.
+
 ## 4. Gate
 
 `bash scripts/gate.sh` (build clean, forbidden sweep, `#print axioms` over `scripts/Axioms.lean`,
