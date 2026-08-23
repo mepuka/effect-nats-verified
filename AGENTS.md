@@ -1,6 +1,9 @@
 # formal/effect_nats_substrate/ — package rules
 
-Extends `../../AGENTS.md`. This package is the Lean model of the effect-nats JetStream
+Extends `../../AGENTS.md` (the Foldable research repository's laws: the tree is the truth,
+clones are read-only, citations verified at the line, generated artifacts deterministic; in the
+standalone `effect-nats-substrate` publication those laws apply unchanged and the cited
+`research/…` documents live in Foldable). This package is the Lean model of the effect-nats JetStream
 sequential core; its specification is a research document, and the model follows the
 document, never the other way around.
 

@@ -1,5 +1,12 @@
 # Effect-NATS substrate model
 
+This package is published on its own as `effect-nats-substrate`, a sibling of
+[`effect-nats`](https://github.com/mepuka/effect-nats), and is developed inside the Foldable
+research repository, where the slice documents, design notes, verification passes, and
+reviews it cites live (every `research/…` path below, and the relative links, resolve there).
+The standalone repository is a history-preserving split of `formal/effect_nats_substrate/`;
+proofs, statements, and the exporter are identical in both.
+
 Executable Lean 4 reference model of the **sequential core** of effect-nats's in-memory
 JetStream interpreter (`mepuka/effect-nats` @ `d06223f`): configuration, subject matching,
 stream storage, and the five non-streaming operations, with the sequential-core invariant
