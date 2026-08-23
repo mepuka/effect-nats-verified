@@ -196,13 +196,19 @@ EffectNatsSubstrate.RtReachable`. (D) as P2 plus `lookupRt`/`updateRt` (`Runtime
 (E) §2.3. Note the non-commutation that is *not* claimed: `closeA i` against `op` — `op` fixes the
 fan-out list from the still-registered subscribers; SB2 is scoped to the fan-out's internal labels.
 
-### P4a — abstract independence lemmas (SB4 prerequisite, in `SimProof.lean`)
+### P4a — abstract independence lemmas (SB4 prerequisite, in `ApplyLemmas.lean`)
 
-On stage A's `apply`: `applyPull_other : i ≠ j → lookupSub (applyPull pull s i).subs j =
+(M) `EffectNatsSubstrate/ApplyLemmas.lean`, `import EffectNatsSubstrate.SubReachable` (reuses
+`lookupSub_map`, `updateSub_keys`, `lookupSub_updateSub_self`; adds `lookupSub_updateSub_ne`).
+Proof-side helpers, not frozen: the seven statements are elaborated in
+`research/logs/p4a_statements.lean` (overwatch round 4, `rt_probe13.lean`, 0 failures on 1 088
+abstract states) and may be reshaped by P4b with a Lane-log note. Independent of P2/P3 — runs as
+its own lane. On stage A's `apply`: `applyPull_other : i ≠ j → lookupSub (applyPull pull s i).subs j =
 lookupSub s.subs j` (when enabled); `applyUnsubscribe_other` likewise; `applyOp_publish_each :
 apply s (.op (publish …) (.ok (.sequence seq))) = some s' → lookupSub s'.subs j = (lookupSub
 s.subs j).map (deliverOne stream m)` (from `afterOp`'s `map`), and the `deleteStream` analogue
-with `endOne`; `applyOp_other_frame` for the other operations. (D) `Next.lean:106-124`
+with `endOne`; `applyOp_other_frame` for the other operations; `applyOp_error_frame : apply s (.op o (.error err)) = some s' → s' = s`
+(the error branch, `Next.lean:119`). (D) `Next.lean:106-124`
 (`afterOp`, `applyOp`), `:134-163` (`applyRegister`, `applyPull`, `applyUnsubscribe`), `:165-169`
 (`applyWith`). These
 are the "per-subscriber independence" assumption of the stage-A slice document §14, now proved.
