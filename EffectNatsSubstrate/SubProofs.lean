@@ -262,27 +262,16 @@ theorem unsubscribe_inv {s : SubState} {sub : Subscriber} (hinv : SubInv s sub) 
 /-! ## `SubInv` depends on the state only through its core -/
 
 theorem SubInv.core_eq {s s' : SubState} {sub : Subscriber} (hinv : SubInv s sub)
-    (h : s.core = s'.core) : SubInv s' sub := by
-  refine ⟨hinv.capacityPos, hinv.capacity, hinv.registeredOpen, ?_, hinv.closingNonempty,
-    hinv.doneEmpty, hinv.shutDownClear, hinv.pendingMatch, hinv.visibleStrict, hinv.visibleBound,
-    hinv.pendingLast⟩
-  intro hr
-  rw [← h]
-  exact hinv.registeredStream hr
+    (h : s.core = s'.core) : SubInv s' sub :=
+  hinv.of_stream_lookup fun _ st₀ hl => ⟨st₀, by rw [← h]; exact hl, Nat.le_refl _⟩
 
 /-- A subscriber untouched by a transition keeps `SubInv` when the core's lookups survive
 with non-decreasing heads. -/
 theorem SubInv.of_lookups {s s' : SubState} {sub : Subscriber} (hinv : SubInv s sub)
     (hcore : ∀ n st₀, lookupStream s.core n = some st₀ →
       ∃ st₁, lookupStream s'.core n = some st₁ ∧ st₀.nextSequence ≤ st₁.nextSequence) :
-    SubInv s' sub := by
-  refine ⟨hinv.capacityPos, hinv.capacity, hinv.registeredOpen, ?_, hinv.closingNonempty,
-    hinv.doneEmpty, hinv.shutDownClear, hinv.pendingMatch, hinv.visibleStrict, hinv.visibleBound,
-    hinv.pendingLast⟩
-  intro hr
-  obtain ⟨st₀, hl, hlt⟩ := hinv.registeredStream hr
-  obtain ⟨st₁, hl', hle⟩ := hcore _ _ hl
-  exact ⟨st₁, hl', Nat.lt_of_lt_of_le hlt hle⟩
+    SubInv s' sub :=
+  hinv.of_stream_lookup fun _ st₀ hl => hcore _ _ hl
 
 /-! ## Preservation under fan-out and deletion -/
 
