@@ -288,7 +288,13 @@ wholesale (diffs must stay reviewable).
 
 ## 5b. Cleanup worklist 2 (2026-08-23; for the cleanup lane)
 
-**Status:** open. Written for the lane that did items 1–7: same constraints as §5 (no frozen
+**Status: done and merged 2026-08-23** — all eighteen items by the cleanup lane (branch
+`cleanupLane2`, 23 commits, `DONE 6ee75ee`), merged into `main` after the §6 gate on the merged
+tree (`scripts/gate.sh`, item 17), the signature probe byte-identical before and after, and the
+exporter identical in both modes; items 15–18 read by the Claude lane, 1–14 by the overwatch.
+Deviations recorded in the commit messages: `SubInv.pulled` over an arbitrary `sub'` with
+`unsubscribe_inv` kept separate (prefix, not equality); `histInv_register` left component-cased.
+Originally written for the lane that did items 1–7: same constraints as §5 (no frozen
 statement changes — names, elaborated types, `SubInv`'s clauses, and the module a frozen theorem
 is stated in; `Next.lean` definitions frozen; helper lemmas may move, merge, or be renamed; the
 gate of §6 after every change; `README.md` "Layout", §1 of this document, and the slice

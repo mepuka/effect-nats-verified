@@ -21,5 +21,8 @@ lake build effect_nats_traces
 lake exe effect_nats_traces -- --foldable-commit "$COMMIT" > /tmp/gate-traces-a.json
 lake exe effect_nats_traces -- --foldable-commit "$COMMIT" > /tmp/gate-traces-b.json
 cmp /tmp/gate-traces-a.json /tmp/gate-traces-b.json
+lake exe effect_nats_traces -- --subscriber --foldable-commit "$COMMIT" > /tmp/gate-sub-a.json
+lake exe effect_nats_traces -- --subscriber --foldable-commit "$COMMIT" > /tmp/gate-sub-b.json
+cmp /tmp/gate-sub-a.json /tmp/gate-sub-b.json
 
 echo "gate: ok"
