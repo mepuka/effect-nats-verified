@@ -55,6 +55,17 @@ theorem lookupStream_removeStream_other :
       · simp [lookupStream, removeStream, hm, hmn]
         exact lookupStream_removeStream_other rest name n hne
 
+theorem lookupStream_removeStream_self :
+    ∀ (s : JSState) (name : StreamName),
+      lookupStream (removeStream s name) name = none
+  | [], _ => rfl
+  | (n, st) :: rest, name => by
+    by_cases hn : n = name
+    · simp only [removeStream, if_pos hn]
+      exact lookupStream_removeStream_self rest name
+    · simp only [removeStream, if_neg hn, lookupStream]
+      exact lookupStream_removeStream_self rest name
+
 theorem lookupStream_insertStream_other (s : JSState) (name n : StreamName) (st : StreamState)
     (hne : name ≠ n) : lookupStream (insertStream s name st) n = lookupStream s n := by
   simp [lookupStream, insertStream, hne]
@@ -117,6 +128,38 @@ theorem createStep_lookup_preserved {s s' : JSState} {r : Ret} {raw : RawStreamC
       by_cases hn : config.name = n
       · subst hn; rw [hl] at habsent; cases habsent
       · rw [lookupStream_insertStream_other _ _ _ _ hn]; exact hl
+
+theorem createStep_ok_shape {s s' : JSState} {raw : RawStreamConfig} {r : Ret}
+    (h : createStep s raw = .ok (s', r)) :
+    s' = s ∨ ∃ config, validate raw = .ok config ∧ lookupStream s config.name = none ∧
+      s' = insertStream s config.name { config := config, messages := [], nextSequence := 1 } := by
+  unfold createStep at h
+  split at h
+  · cases h
+  · rename_i config hval
+    split at h
+    · split at h
+      · cases h; exact Or.inl rfl
+      · cases h
+    · rename_i hlook
+      cases h
+      exact Or.inr ⟨config, hval, hlook, rfl⟩
+
+theorem getStep_ok_eq {s s' : JSState} {name : StreamName} {r : Ret}
+    (h : getStep s name = .ok (s', r)) : s' = s := by
+  unfold getStep at h
+  split at h
+  · cases h; rfl
+  · cases h
+
+theorem lastMsgStep_ok_eq {s s' : JSState} {stream : StreamName} {subject : SubjectName} {r : Ret}
+    (h : lastMsgStep s stream subject = .ok (s', r)) : s' = s := by
+  unfold lastMsgStep at h
+  split at h
+  · cases h
+  · split at h
+    · cases h; rfl
+    · cases h
 
 /-- The successful non-publish, non-delete operations keep every lookup that
 existed; `step` on them is `createStep`, `getStep`, or `lastMsgStep`. -/

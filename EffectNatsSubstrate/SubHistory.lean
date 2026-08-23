@@ -168,50 +168,6 @@ theorem liveOf_at_length (committed : List (StreamName × StoredMessage)) (sub :
   rw [List.drop_length]
   rfl
 
-/-! ## Core shapes the ledger needs -/
-
-theorem lookupStream_removeStream_self : ∀ (s : JSState) (name : StreamName),
-    lookupStream (removeStream s name) name = none
-  | [], _ => rfl
-  | (n, st) :: rest, name => by
-    by_cases hn : n = name
-    · simp only [removeStream, if_pos hn]
-      exact lookupStream_removeStream_self rest name
-    · simp only [removeStream, if_neg hn, lookupStream]
-      exact lookupStream_removeStream_self rest name
-
-theorem createStep_ok_shape {s s' : JSState} {raw : RawStreamConfig} {r : Ret}
-    (h : createStep s raw = .ok (s', r)) :
-    s' = s ∨ ∃ config, validate raw = .ok config ∧ lookupStream s config.name = none ∧
-      s' = insertStream s config.name { config := config, messages := [], nextSequence := 1 } := by
-  unfold createStep at h
-  split at h
-  · cases h
-  · rename_i config hval
-    split at h
-    · split at h
-      · cases h; exact Or.inl rfl
-      · cases h
-    · rename_i hlook
-      cases h
-      exact Or.inr ⟨config, hval, hlook, rfl⟩
-
-theorem getStep_ok_eq {s s' : JSState} {name : StreamName} {r : Ret}
-    (h : getStep s name = .ok (s', r)) : s' = s := by
-  unfold getStep at h
-  split at h
-  · cases h; rfl
-  · cases h
-
-theorem lastMsgStep_ok_eq {s s' : JSState} {stream : StreamName} {subject : SubjectName} {r : Ret}
-    (h : lastMsgStep s stream subject = .ok (s', r)) : s' = s := by
-  unfold lastMsgStep at h
-  split at h
-  · cases h
-  · split at h
-    · cases h; rfl
-    · cases h
-
 /-! ## The ledger invariant -/
 
 /-- Every stored message is in the ledger; every ledger record is for an assigned id;
