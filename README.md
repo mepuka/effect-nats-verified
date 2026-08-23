@@ -1,6 +1,6 @@
 # Effect-NATS substrate model
 
-This package is published on its own as `effect-nats-substrate`, a sibling of
+This package is published on its own as `effect-nats-verified`, a sibling of
 [`effect-nats`](https://github.com/mepuka/effect-nats), and is developed inside the Foldable
 research repository, where the slice documents, design notes, verification passes, and
 reviews it cites live (every `research/…` path below, and the relative links, resolve there).
