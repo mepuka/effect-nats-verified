@@ -578,7 +578,9 @@ Witnesses already proved (`RtTraces.lean`, `Sim.lean`, frozen names): `rt_before
 `rt_counterexample_admitted`, `wrong_linearization_differs`, `right_linearization_agrees`,
 `all_rt_traces`, `counterexample_inclusion_witness`, `counterexample_wrong_witness`.
 
-Approved edit regions after this freeze: the four new proof modules named above and proved
+Approved edit regions after this freeze: the four new proof modules named above, proof-side
+definition modules in the `RtInvariants.lean` precedent (`SimRelation.lean`, added 2026-08-23: the
+relation behind `a4_inclusion`, reshapeable while the frozen statements still follow), and proved
 helper lemmas anywhere under `EffectNatsSubstrate/`; a change to any declaration listed here
 returns to the slice document with an old/new entry in the statement revision log below.
 Axiom policy unchanged (`propext`, `Classical.choice`, `Quot.sound`); no `set_option`; `decide`
