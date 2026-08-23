@@ -231,7 +231,11 @@ over `rls`, `labels`, `owed` and derive the frozen one; the frozen statement is 
 
 (S) `A4Complete`. (E) §2.5, from `a4_inclusion`'s witness; helper: `historiesFrom_contains_of_valid`
 (a valid label sequence of the trace's serial with `id`'s pulls inserted, at most two
-consecutively, is enumerated by `outcomesFrom`).
+consecutively, is enumerated by `outcomesFrom`). **Required, not optional:** the "at most two returning pulls
+per abstract gap" bound that `pullsAtGap`'s fuel encodes (`SubPlacements.lean`) is proved as a
+named lemma (`pullStep` returns `none` on an empty pending list after at most one `caughtUp` —
+cite the lines) before `a4_complete` uses it; an enumeration probe is not acceptance evidence
+(overwatch Q12, disposed 2026-08-23).
 
 ## 4. Gate
 
