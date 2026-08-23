@@ -82,7 +82,7 @@ def A4Inclusion : Prop :=
       (∀ stream, subscriberCount sA stream = subscriberCount (eraseRt s) stream)
 
 /-- **Completeness of the acceptance sets for the runtime model** (SB5; a Pass
-B candidate; **r4.1**). For a *valid* stage-A trace (`runLabels` accepts its
+B candidate; **r4.1, r4.2**). For a *valid* stage-A trace (`runLabels` accepts its
 labels as written) without `unsubscribe` labels, every runtime execution with
 the trace's serial sequence and no scope closures ends, at quiescence, with
 each registered subscriber's chunk history in the set the exporter prints for
@@ -93,7 +93,13 @@ whose subscribers never pull) are outside it by hypothesis. The validity
 hypothesis was missing in r4: `outcomesFrom` drops a placement at a disabled
 label of *another* subscriber, so an invalid trace (a pull on an empty buffer)
 has an empty acceptance set — `scripts/A4CompleteR4Refutation.lean` proves
-`¬ A4CompleteR4` for the r4 form. -/
+`¬ A4CompleteR4` for the r4 form. **r4.2** adds the guard `A4Inclusion` already carries,
+`(lookupRt s.subs id).isSome = true`: `subIds t` lists the id of *every* `register` label,
+including one that reports `StreamNotFound` and creates no subscriber; for such an id the
+abstract side starts a history `[[]]` at the register label (`afterLabel`) while the runtime has
+no subscriber and `rtHistory` is `[]` — `scripts/A4CompleteR41Refutation.lean` proves the r4.1
+form false (found by the P5c lane, 2026-08-23). The claim is about runtime subscribers that
+exist. -/
 def A4Complete : Prop :=
   ∀ (t : SubTrace),
     (runLabels initialSub (t.steps.map (·.label))).isSome = true →
@@ -102,7 +108,8 @@ def A4Complete : Prop :=
       runRtSteps initialRt rls = some s → s.fanOut = none →
       rls.all (fun l => match l with | .closeA _ => false | .closeB _ => false | _ => true) = true →
       rtSerial rls = labelSerial (t.steps.map (·.label)) →
-      ∀ id, id ∈ subIds t → (historiesWith apply t id).contains (rtHistory s id) = true
+      ∀ id, id ∈ subIds t → (lookupRt s.subs id).isSome = true →
+        (historiesWith apply t id).contains (rtHistory s id) = true
 
 /-! ## The §4.2 instance, kernel-checked -/
 

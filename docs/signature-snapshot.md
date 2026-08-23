@@ -1,6 +1,6 @@
 # Signature snapshot — public proof surface
 
-**Snapshot:** 2026-08-23, revision 4.1 — stage B1 (r4; r4.1 corrects `A4Complete`) frozen over stage A (r3.1, ratified
+**Snapshot:** 2026-08-23, revision 4.2 — stage B1 (r4; r4.1 and r4.2 correct `A4Complete`) frozen over stage A (r3.1, ratified
 2026-08-22; r3.2 addition 2026-08-23) over the sequential core (r1–r2.1). The frozen surface is the
 union of the sections below (r1, r2, Stage A (r3.1), Stage B1 (r4)); the package holds 252
 source-level `theorem` declarations (`grep -h '^theorem' EffectNatsSubstrate/*.lean | wc -l`, the
@@ -67,6 +67,19 @@ proof bodies and proved helper lemmas may change freely.
   closes and `unsubscribe` traces but not invalid traces (slice document §16, row added). No other
   statement changed; the signature probe baseline was re-taken and differs from the r4 baseline in
   this one declaration.
+- **r4.2 (2026-08-23, second post-freeze correction of the same statement).** `A4Complete` gains the
+  guard `(lookupRt s.subs id).isSome = true` on its conclusion — the guard `A4Inclusion` already
+  carries. The r4.1 form is **false**: `subIds t` lists the id of every `register` label, including
+  one that reports `StreamNotFound` and creates no subscriber; the abstract side starts that id's
+  history `[[]]` at the register label (`afterLabel` fires on any register), the runtime has no
+  subscriber and `rtHistory` is `[]`. Kernel-checked, standard axioms:
+  `scripts/A4CompleteR41Refutation.lean` (`a4CompleteR41_false`). Found by the P5c lane while
+  locking its target, before any proof work; the lane handed off rather than editing, as the
+  protocol requires. Two independent misses preceded it: the coordinator considered this case at
+  r4.1 and mis-evaluated `afterLabel`; the overwatch's r4.1 confirmation used valid-trace families
+  with no failed registrations. Control added: probe families for any statement over `SubTrace`
+  must include failed registrations, repeated ids, and absent subscribers. Signature probe
+  baseline re-taken; differs from r4.1 in this one declaration.
 - **r3.2 (2026-08-23, addition; no statement changed).** A ninth stage-A trace `saReplayLag` /
   `sa_replay_lag_trace` (`SubTraces.lean`): replay into a `TerminateOnLag 1` buffer, the one shape
   that can reach the live adapter's replay-through-the-queue class (ADR-0008; overwatch finding
@@ -530,6 +543,7 @@ def abstractHistory (labels : List Label) (id : SubId) : Option History
 def A4Inclusion : Prop      -- as in Sim.lean (serial sequence, chunk histories, subscriber counts)
 def A4Complete : Prop       -- as in Sim.lean (membership in historiesWith apply t id); r4.1: for a
                             -- valid trace, `(runLabels initialSub (t.steps.map (·.label))).isSome = true`
+                            -- r4.2: conclusion guarded by `(lookupRt s.subs id).isSome = true`
 -- SubPlacements.lean (r3.2 definitions now read by frozen statements)
 abbrev History := List (List Observed)
 def appended, afterLabel, pullsAtGap, outcomesFrom, historiesFrom, subIds, labelsWithoutPulls,
@@ -611,4 +625,6 @@ only on concrete data.
   these is a post-freeze change.
 - 2026-08-23, **r4.1, post-freeze**: `A4Complete` gains the valid-trace hypothesis (revision log
   r4.1; refutation `scripts/A4CompleteR4Refutation.lean`). The only post-freeze statement change of
-  stage B1 so far.
+  stage B1 at the time.
+- 2026-08-23, **r4.2, post-freeze**: `A4Complete`'s conclusion guarded by the runtime subscriber's
+  presence (revision log r4.2; refutation `scripts/A4CompleteR41Refutation.lean`).

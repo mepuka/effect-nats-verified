@@ -233,8 +233,9 @@ over `rls`, `labels`, `owed` and derive the frozen one; the frozen statement is 
 
 ### P5 — `a4_complete : A4Complete` (SB5)
 
-(S) `A4Complete` **as of r4.1** (valid-trace hypothesis; the r4 form is refuted in
-`scripts/A4CompleteR4Refutation.lean`). The proof needs, from P4b, an auxiliary form of
+(S) `A4Complete` **as of r4.2** (valid-trace hypothesis, r4.1; conclusion guarded by the runtime
+subscriber's presence, r4.2; the r4 and r4.1 forms are refuted in `scripts/A4CompleteR4Refutation.lean`
+and `scripts/A4CompleteR41Refutation.lean`). The proof needs, from P4b, an auxiliary form of
 `a4_inclusion` whose witness `labels` contains only `.op`/`.register`/`.pull` labels when the run has
 no `closeA`/`closeB` (the frozen `A4Inclusion` does not say so) — P4b must prove and export that
 auxiliary statement. Then: other subscribers' pulls can be moved to the trace's positions without
