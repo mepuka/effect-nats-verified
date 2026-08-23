@@ -234,3 +234,4 @@ open EffectNatsSubstrate
 #print axioms op_visible_frame_generic
 #print axioms op_visible_frame_of_laws
 #print axioms op_visible_frame_is_instance
+#print axioms historiesFrom_contains

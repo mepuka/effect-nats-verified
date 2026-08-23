@@ -125,6 +125,7 @@ EffectNatsSubstrate/
   SimRelation.lean   the relation behind a4_inclusion: linearization points, corrSub, Rel, RelHist
   RtWitnesses.lean   non-vacuity witnesses and empty-list guards for the B1 frozen statements (P6a)
   ApplyLaws.lean     the laws stage A assumes of deliver/pull, and one theorem re-derived over them (L7a)
+  SimPlaced.lean     the acceptance sets enumerate every enabled pull placement (stage-B1 P5b)
 Main.lean            the fixture exporter
 ```
 
