@@ -222,3 +222,4 @@ open EffectNatsSubstrate
 #print axioms a4inclusion_witness
 #print axioms abstractHistoryFrom_agreeAt
 #print axioms abstractHistoryFrom_strip_pull
+#print axioms historiesFrom_contains
