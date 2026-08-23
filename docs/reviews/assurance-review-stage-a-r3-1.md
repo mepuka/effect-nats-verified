@@ -383,3 +383,14 @@ refinement theorem.
    later slices with their own models and assurance reviews.
 
 ## Correction log (append-only)
+
+Correct pass of 2026-08-23 over F1–F7 by the Claude lane, each re-verified against the tree at Foldable `e43d8e4` (the review's pin) and at `main` (precedence tree > pass > document). Owner of every entry: the Claude lane.
+
+- [claude | — | F1] DEFERRED to r4 (in flight) — the correction *is* the stage-B1 program: `A4Inclusion`, `A4Complete`, the queue laws, `RtInv`, commutation are frozen (snapshot r4) and being proved by the prover lane; E3 stays a named external-trust assumption (slice document §2.4), with E5 added at Pass B.
+- [claude | research/2026-08-22-subscriber-stage-a.md §14, EffectNatsSubstrate/SubPlacements.lean docstring | F2] APPLIED — `freeRunning.outcomes[id]` described as a per-subscriber acceptance set conditional on the independence assumption, to be discharged by the abstract independence lemmas (P4a) and `RtCommute` (SB2); no theorem about joint executions is read off marginal membership.
+- [claude | — | F3] APPLIED (post-pin) — the prefix-closure limitation at `23566bd` is as stated; the terminal-outcomes follow-up is merged at effect-nats `0876c41` (`terminalOutcomes` asserted for uninterrupted runs) and does not retroactively strengthen the reviewed pin.
+- [claude | research/2026-08-23-effect-nats-lanes-plan.md | F4] APPLIED — the plan's status row now states live compatibility with its versions and the fresh-server / pre-pull `flush()` convention, `subscriberCount` excluded; the findings document already carried the boundary.
+- [claude | — | F5] no change — no document claims the live adapter implements the r3.1 LTS; the ninth trace `sa-replay-lag` (r3.2) reached the replay-through-queue class on live and is recorded as a class-(a) divergence (effect-nats `0876c41`), a boundary test by design.
+- [claude | scripts/AxiomsAll.lean, scripts/gate.sh, docs/signature-snapshot.md header | F6] APPLIED — an exhaustive axiom census enumerates every theorem constant in the `EffectNatsSubstrate` namespace from the environment (956 at this commit; 0 on non-standard axioms) and the gate runs it beside the named frozen-surface probe; counting policy stated (`grep -h '^theorem' EffectNatsSubstrate/*.lean`: 252 at this commit; the reviewer's 242 and the header's earlier 230 were counts under other conventions).
+- [claude | .github/workflows/lean_action_ci.yml | F7] APPLIED — `actions/checkout` pinned to `fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09` (`# v5`).
+- done — applied 5, rejected 0, deferred 1, no change 1.
