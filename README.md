@@ -1,102 +1,119 @@
 # Effect-NATS substrate model
 
-This package is published on its own as `effect-nats-verified`, a sibling of
-[`effect-nats`](https://github.com/mepuka/effect-nats), and is developed inside the Foldable
-research repository, where the slice documents, design notes, verification passes, and
-reviews it cites live (every `research/…` path below, and the relative links, resolve there).
-The standalone repository is a history-preserving split of `formal/effect_nats_substrate/`;
-proofs, statements, and the exporter are identical in both.
+A Lean 4 model of the in-memory JetStream interpreter in
+[`effect-nats`](https://github.com/mepuka/effect-nats) — the component that stands in for a
+NATS server in that library's tests — with kernel-checked proofs of how it behaves. The model
+is a line-by-line transliteration of the TypeScript at a pinned commit. Its theorems are about
+the model; the link back to the code is a fixture of recorded histories that effect-nats
+replays against both the memory interpreter and a live server.
 
-Executable Lean 4 reference model of the **sequential core** of effect-nats's in-memory
-JetStream interpreter (`mepuka/effect-nats` @ `d06223f`): configuration, subject matching,
-stream storage, and the five non-streaming operations, with the sequential-core invariant
-proofs (T1–T7) and kernel-checked worked traces — and, since stage A (pin `872bd7f`, snapshot
-r3.1), the `TerminateOnLag` subscriber layer over that core: registration with every
-start position, bounded pending buffers, whole-buffer pulls, overflow-terminates, deletion,
-unsubscribe. Scope, corrected obligations, and deferrals are fixed by
-[the first-slice proposal](../../research/2026-08-22-first-slice-jetstream-memory-lean-model.md)
-and [the stage-A slice document](../../research/2026-08-22-subscriber-stage-a.md); this package
-implements exactly their boundaries.
+This repository is the package `formal/effect_nats_substrate/` of the Foldable research
+repository, published on its own with its history. The slice documents, reviews, and plan it
+cites under `research/…` live in Foldable.
 
-It separates three questions:
+## What is proved
 
-1. what the seam's sequential state and transitions are (`Subject`, `Config`, `State`, `Step`);
-2. which properties those transitions have from the empty state (`Invariants`, `Views`,
-   `Proofs` — T1 create-idempotence/conflict, T2 strict per-stream sequence discipline,
-   T3 last-message-is-max, T4 compare-and-set, T5 rollup, T6 capacity and most-recent
-   retention, T7 subject binding);
-3. what a recorded history looks like against the model (`Traces` — eight traces as data,
-   each a list of steps with expected outcomes plus views of the final state, kernel-checked
-   with `decide`; `Main.lean` prints them as a JSON fixture, which effect-nats replays against
-   the memory interpreter and the live server from its commit `872bd7f` on —
-   `test/LeanTraceReplay.ts`, a later pin than this package's transliteration pin `d06223f`).
+The sequential core covers stream creation, lookup, deletion, publish, and last-message
+lookup. Seven theorems (T1–T7) hold on every state reachable from the empty state: creating a
+stream twice with the same configuration is idempotent and conflicts otherwise; sequence
+numbers within a stream strictly increase; the last message of a subject carries that
+subject's highest sequence; compare-and-set publish succeeds exactly when the expected
+sequence matches; a rollup publish replaces the subject's history; a per-subject capacity
+keeps the most recent messages; a publish to an unbound subject is rejected.
 
-A trace's `mirrors` list names the conformance cases whose behaviors its steps instantiate; it
-is evidence metadata that `runTrace` never reads, and the `config-order` probe carries none.
-Fidelity to the TypeScript interpreter is claimed only under the seam's declared carrier
-restrictions — unique header keys (the seam's `ReadonlyMap`; the model's lookup is first-match)
-and non-negative capacity — and only as compatibility on replayed histories.
+The subscriber layer (stage A) covers `consume` with the `TerminateOnLag` buffer policy:
+registration with every start position, a bounded pending buffer, whole-buffer pulls,
+termination on overflow, stream deletion, and unsubscribe. Its theorems (SA1–SA7, SA5h) say
+that the buffer never exceeds its capacity; that registration hands the consumer exactly the
+replay snapshot the TypeScript computes; that a pull changes nothing the consumer can see, a
+matching publish appends exactly the stored message when there is room and ends the
+subscription when there is none, and every other operation leaves the visible sequence alone;
+that deleting a stream ends its registered subscribers and re-creating it restarts at
+sequence 1; that the lag error carries the sequence of the last entry the consumer saw; and,
+the global form, that what a registered subscriber can see is its replay snapshot followed by
+exactly the matching messages published after it registered. Storage forgets pruned and
+rolled-up messages, so that last statement is proved on a proof-only ledger of every
+publish (a history variable in the sense of Abadi and Lamport), with theorems showing the
+ledger changes no behaviour.
 
-Deliberately small: no `PullWindow`/`Blocked`, no `EffectQueue` runtime model (stage B), no
-JSONL trace ingestion, no `.nuscr` printer. The subscriber layer's queue facts Q1–Q3 and its
-quiescence assumption A4 are named, not proved, until stage B; nothing here is a statement
-about Effect `Queue`, the TypeScript interpreter, or `nats-server` beyond compatibility on
-replayed histories.
-This is the parent discussion's (§18) trace-replay bridge at its honest size: the sequential
-spine first, kernel-checked traces standing in for the replay harness until the
-observation-ordering question is answered.
+Witnesses accompany the theorems. Sixteen traces mirror the conformance cases of the
+TypeScript test suite and are checked by the kernel with `decide`; ten negative witnesses
+show which steps the model refuses; two deliberately wrong models — one-element pulls, and a
+`lastDelivered` that advances on the overflowing message — fail the traces built to catch them
+and pass the rest.
+
+The package has zero `sorry`, declares no axioms, uses no `native_decide`, and closes every
+theorem under `propext`, `Classical.choice`, and `Quot.sound`. It depends on Lean core only
+(`leanprover/lean4:v4.33.0`).
+
+## What the proofs do not say
+
+A theorem here is a fact about the model. Whether the model matches the TypeScript rests on
+the transliteration (pins `d06223f` for the core, `872bd7f` for subscribers), the declared
+carrier restrictions (unique header keys; non-negative capacity), and replay of the exported
+traces. Replay evidence exists today for the sequential core; the subscriber traces are not
+yet exported in a form the harness can run.
+
+Four facts about the runtime are assumed, named, and not proved here. Q1: a pull drains the
+whole buffer. Q2: failing a queue delivers its buffer before the error. Q3: shutdown discards
+the buffer. A4: the model places whole pulls between whole operations, while the runtime can
+schedule a consumer's pull inside a publish's fan-out; for `TerminateOnLag` every such
+interleaving is assumed equivalent to one of the model's placements. Stage B discharges them.
+
+Out of scope: the `PullWindow` policy and its blocked state, the Effect `Queue` itself,
+acknowledgements, redelivery, durable consumers, and any claim about `nats-server` beyond what
+a replay records.
+
+## What comes next
+
+- Export the subscriber traces (fixture schema 2) and extend the effect-nats replay harness
+  to realise them, with a free-running consumer mode to test assumption A4 empirically.
+- An assurance review of the stage-A result across specification, model, proof,
+  implementation, and deployment assumptions.
+- Stage B: a model of Effect's `Queue` transliterated from its source, proofs of Q1–Q3, a
+  simulation from runtime steps to the model's labels that discharges A4, the `PullWindow`
+  policy, and liveness stated under a named fairness assumption.
+- A session-type pilot: the consume protocol as a binary session type checked against the
+  subscriber model, then a multiparty family over N subscribers.
 
 ## Run
 
 ```text
-lake build                                   # every module, all proofs, the sixteen kernel-checked traces
+lake build                                # every module, every proof, the sixteen traces
 lake build effect_nats_traces
-lake exe effect_nats_traces [-- --foldable-commit <hash>] > fixture.json   # deterministic replay fixture
+lake exe effect_nats_traces [-- --foldable-commit <hash>] > fixture.json
 ```
 
-The exporter's output is a pure function of the sources and the optional commit argument — run
-it twice and `cmp`; the effect-nats copy lives at `test/fixtures/lean/` with the producing
-commit embedded, and is regenerated by hand when the traces change.
+The exporter is deterministic: two runs produce identical bytes. effect-nats keeps the fixture
+at `test/fixtures/lean/` with the producing commit embedded and regenerates it by hand when the
+traces change.
 
 ## Layout
 
 ```text
 EffectNatsSubstrate/
-  Subject.lean     token-level NATS subject matching (structural splitter, decide-reducible)
-  Config.lean      RawStreamConfig → validate → StreamConfig; ConfigEq; canonicalize
-  State.lean       StoredMessage, StreamState, JSState association list; forSubject
-  Step.lean        Op / JSError / Ret; step : JSState → Op → Except JSError (JSState × Ret)
-  Invariants.lean  streamInv / stateInv / Reachable; seqPositive, capacityBounded, keepLatest
-  Views.lean       forSubject through publishBase / newMessage / pruneSubject
-  Proofs.lean      T1–T7; zero sorry; standard axioms only
-  Traces.lean      Trace / TraceStep / Expect / ViewCheck, runTrace, eight traces, kernel-checked
-  Subscriber.lean  stage A carriers: Policy, StartPosition, ConsumeOptions, QueueStatus, Observed,
-                   Subscriber, SubState (pin 872bd7f)
-  SelectReplay.lean  selectReplay (five start positions over matchesAny), replayObserved
-  Next.lean        Label; deliverOne / endOne / pullStep; replayBound; apply / Next / ReachableSub
-  SubTraces.lean   SubTrace runner, eight stage-A traces (C7–C10, C13–C15, M1, Q1), W1/W2 wrong models
-  SubInvariants.lean  visible, entrySequences, SubInv (eleven clauses), StateInv, SubShape
-  SubCore.lean     lookup and step-shape lemmas over the core; visible / entrySequences equations
-  SubProofs.lean   per-label preservation of SubInv; SA1 frame; selectReplay lemmas
-  SubReachable.lean  the only ReachableSub induction: SA2 stateInv_reachable, SA3 pending_le_capacity
-  SubStatements.lean SA4–SA7 and the negative witnesses (snapshot r3.1)
-  SubHistory.lean  SA5h: the history-extended model (proof-only ledger), AV1/AV2, visible_global
-Main.lean          exporter: lake exe effect_nats_traces → JSON fixture (the only module importing Lean)
+  Subject.lean       NATS subject matching
+  Config.lean        stream configuration, validation, equality
+  State.lean         messages, streams, the state as an association list
+  Step.lean          the five operations as one step function
+  Invariants.lean    per-stream invariants and reachability
+  Views.lean         per-subject views of a committed publish
+  Proofs.lean        T1–T7
+  Traces.lean        the sequential traces, checked by decide
+  Subscriber.lean    subscriber carriers
+  SelectReplay.lean  the replay snapshot for each start position
+  Next.lean          labels, fan-out, pull, the transition function, reachability
+  SubTraces.lean     the subscriber traces and the two wrong models
+  SubInvariants.lean the subscriber invariant and the visible sequence
+  SubCore.lean       facts about the core the subscriber proofs use
+  SubProofs.lean     preservation of the invariant by each transition
+  SubReachable.lean  the one induction over reachable states
+  SubStatements.lean SA4–SA7 and the negative witnesses
+  SubHistory.lean    the ledger model and the global statement SA5h
+Main.lean            the fixture exporter
 ```
 
-Every per-subject theorem is an equation on `forSubject` (the storage-order filter, the TS
-`forSubject` local). `Views.lean` is the only module that reasons about `dropOldest`,
-`pruneSubject`, and `publishBase` directly; it ends in the two equations that characterise
-a committed publish — the published subject's view becomes
-`keepLatest limit (prior-or-[] ++ [new])`, every other subject's view is unchanged — and
-`Proofs.lean` works from those.
-
-[docs/signature-snapshot.md](docs/signature-snapshot.md) freezes the public proof surface
-(r1–r2.1 and stage A's r3.1 frozen); assurance reviews live in
-`docs/reviews/`; [docs/stage-a-proof-map.md](docs/stage-a-proof-map.md) explains how the
-stage-A proofs fit together and lists the maintenance cleanup still open.
-Naming follows the corpus conventions: distinct identifier names (`StreamName`, `SubjectName`,
-`StreamSeq`, `PayloadHash`), a deterministic `step` now with the nondeterministic `Next`
-relation reserved for the subscriber slice, and `step`/`Reachable` vocabulary compatible with
-cslib's LTS layer when the protocol slice arrives. Lean is pinned by `lean-toolchain`
-(`leanprover/lean4:v4.33.0`); the package intentionally has no external dependencies.
+[docs/signature-snapshot.md](docs/signature-snapshot.md) records the frozen theorem
+statements; a statement changes only through the slice document and the snapshot together.
+[docs/stage-a-proof-map.md](docs/stage-a-proof-map.md) explains how the stage-A proofs fit
+together. Reviews are under `docs/reviews/`.
