@@ -39,7 +39,7 @@ still owes — and paying it at the end of the fan-out.
 | `Sim.lean` | `rtSerial`, `labelSerial`, `abstractHistoryFrom`, `abstractHistory`, `A4Inclusion`, `A4Complete` | the statements (frozen) |
 | `EffectQueueLaws.lean` | the nine SB1 theorems (proved 2026-08-23, P1) | queue laws |
 | `RtReachable.lean` (to write) | per-label `RtInv` preservation, `rtInv_reachable`, `core_frame`, `core_reachable`, `pending_le_capacity_rt` | SB3, SB6, SB7 |
-| `RtCommute.lean` (to write) | `bindStep`, `commute_consumer_publisher`, `commute_consumers` | SB2 |
+| `RtCommute.lean` | `bindStep`, `commute_consumer_publisher`, `commute_consumers` (proved 2026-08-23, P3) | SB2 |
 | `SimRelation.lean` | `pointPassed`, `owedOp`, `corrSub`, `corrOn`, `OwedOk`, `Rel`, `RelHist` — the relation as definitions (proof-side; reshapeable) | the target of P4b |
 | `RtList.lean` | `lookupRt_updateRt_self` (the `map` equation), `lookupRt_updateRt_ne`, `updateRt_keys` — the shared toolkit, extracted from `SimProof` at the coordinator's consolidation (2026-08-23); `RtReachable`/`RtCommute`/`SimProof` import it | proof-side |
 | `ApplyLemmas.lean` | `lookupSub_updateSub_ne`, `applyPull_other`, `applyUnsubscribe_other`, `applyOp_publish_each`, `applyOp_delete_each`, `applyOp_other_frame`, `applyOp_error_frame` (proved 2026-08-23, P4a); `pullStep_third_none`, `pull_third_none` (proved 2026-08-23, T2) | the abstract independence lemmas; the at-most-two-returning-pulls bound P5 rests on |

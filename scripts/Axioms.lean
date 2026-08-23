@@ -417,3 +417,6 @@ open EffectNatsSubstrate
 #print axioms runLabels_agreeAt_other
 #print axioms runLabels_split
 #print axioms runLabels_strip_pulls
+#print axioms bindStep
+#print axioms commute_consumer_publisher
+#print axioms commute_consumers

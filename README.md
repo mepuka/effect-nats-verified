@@ -123,6 +123,7 @@ EffectNatsSubstrate/
   RtTraces.lean      the stage-B1 scenarios, checked by decide
   Sim.lean           the stage-B1 statements: A4Inclusion, A4Complete
   EffectQueueLaws.lean the queue laws Q1–Q3 as theorems (SB1)
+  RtCommute.lean     the fan-out's steps commute with a different subscriber's own steps (SB2)
   SimRelation.lean   the relation behind a4_inclusion: linearization points, corrSub, Rel, RelHist
   SimProof.lean      the simulation: per-label preservation of the relation, the induction,
                      and a4_inclusion_of_rtInv (stage-B1 P4b)
