@@ -27,6 +27,7 @@ import EffectNatsSubstrate.SubReachable
 import EffectNatsSubstrate.ApplyLemmas
 import EffectNatsSubstrate.SimAgree
 import EffectNatsSubstrate.SimPlaced
+import EffectNatsSubstrate.SimProof
 import EffectNatsSubstrate.RtWitnesses
 import EffectNatsSubstrate.SubStatements
 import EffectNatsSubstrate.SubHistory

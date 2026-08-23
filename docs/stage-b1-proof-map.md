@@ -45,7 +45,7 @@ still owes — and paying it at the end of the fan-out.
 | `SimAgree.lean` | `AgreeAt`, `agreeAt_refl`, `agreeAt_symm`, `agreeAt_trans`, `applyPull_agreeAt`, `apply_agreeAt`, `observedOf_agreeAt` (proved 2026-08-23, P5a); `abstractHistoryFrom_agreeAt`, `abstractHistoryFrom_strip_pull` (proved 2026-08-23, P5b-prep) | agreement at one subscriber: the helpers `a4_complete` uses to move other subscribers' pulls without changing what subscriber `k` sees or what its history records |
 | `RtWitnesses.lean` | `allSubTraces_count`, `allRtTraces_count`, `sb1_witness`, `sb3_witness`, `a4complete_witness`, `a4inclusion_witness` (proved 2026-08-23, P6a) | non-vacuity witnesses and empty-list guards for the B1 frozen statements |
 | `SimPlaced.lean` | `Placed`, `historiesFrom_contains` (proved 2026-08-23, P5b) | the enumeration side of SB5: every enabled insertion of `id`'s pulls into a pull-free label list lands in the acceptance set |
-| `SimProof.lean` (to write) | the abstract independence lemmas, the relation's preservation, `a4_inclusion`, `a4_complete` | SB4, SB5 |
+| `SimProof.lean` | the relation's per-label preservation, the induction `rel_run`, `a4_inclusion_of_rtInv` and the P5c export `a4_inclusion_pullOnly_of_rtInv` (proved 2026-08-23, P4b; `a4_complete` still to write) | SB4, SB5 |
 
 Dependency order: `EffectQueue → Runtime → RtInvariants → RtTraces → Sim → EffectQueueLaws →
 RtReachable → RtCommute → SimProof`; all imported by the root. Every proof module is added to
