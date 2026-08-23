@@ -33,6 +33,11 @@ proof bodies and proved helper lemmas may change freely.
   is declared in the proposal (§3.1) rather than modeled: `headerLookup` is first-match, the
   seam's `ReadonlyMap` has one value per key.
 
+- **r3 — proposed 2026-08-22, pending owner ratification** (slices plan slice 4, stage A): the
+  subscriber layer for `TerminateOnLag` buffers over the unchanged core, stated in the section
+  "Stage A (r3)" at the end of this file. Statements there are the freeze candidates; nothing in
+  r1–r2.1 changes. The transliteration pin of the new modules is effect-nats `872bd7f`.
+
 ## Carriers and transitions
 
 ```text
@@ -208,3 +213,117 @@ Errors preserve state by construction (`step` returns `Except`); there is no the
 state, and none should be added for it. `publish_ok_iff` is the success characterisation;
 `publish_unbound`, `publish_rollup_denied`, and `publish_cas_mismatch` pin *which* error each
 failed gate raises, in the implementation's check order.
+
+## Stage A (r3) — proposed, pending owner ratification
+
+Source: `research/2026-08-22-subscriber-stage-a.md` (§3–§4 representation, §9.2 obligations);
+pin effect-nats `872bd7f` (`Subscriber.lean`, `SelectReplay.lean`, `Next.lean` headers cite the
+lines). Prior art absorbed: `research/2026-08-22-lean-prior-art-session-automata-queues.md`
+closing map B (no mechanized source replaces the project-specific state; `decide` is the stable
+boundary for finite traces; structural induction + `simp`/`grind`/`omega` for the rest).
+
+### Carriers, labels, transition (frozen with r3)
+
+```text
+abbrev SubId := Nat
+inductive Policy | terminateOnLag (n : Nat)                      -- n ≥ 1 at the label boundary
+inductive StartPosition | allHistory | lastPerSubject | newOnly | fromSequence n | afterSequence n
+structure ConsumeOptions   -- filters, start, buffer
+inductive SubError | streamNotFound stream | consumerLagged stream lastDelivered
+inductive QueueStatus | opened | closing e | done e | shutDown   -- opened = Effect's Open
+inductive Observed | entry m | caughtUp | failed e
+structure Subscriber       -- stream filters policy pending status registered lastEnqueued observed
+structure SubState         -- core : JSState, subs : List (SubId × Subscriber), nextId
+def initialSub, lookupSub, updateSub, subscriberCount
+def isLastOfSubject, selectReplay, replayObserved
+inductive Label | op o expect | register stream opts lastEnqueued₀ id expect | pull id | unsubscribe id
+def deliverOne, endOne, pullStep, newSubscriber
+def afterOp, applyOp, applyRegister, applyPull, applyUnsubscribe, applyWith   -- the skeleton
+def apply : SubState → Label → Option SubState := applyWith deliverOne pullStep
+def Next (s l s') : Prop := apply s l = some s'
+inductive ReachableSub : SubState → Prop   -- init : initialSub; step : Next
+def entrySequences, visible (sub) := observed ++ pending.map entry
+structure SubInv (s sub) : Prop   -- eight clauses, SubInvariants.lean
+def StateInv (s) := ∀ p ∈ s.subs, SubInv s p.2
+```
+
+Assumptions named, not proved here (discharged in stage B against `EffectQueue`): Q1 a pull
+drains the whole buffer; Q2 `fail` delivers the buffer then the error; Q3 `shutdown` discards the
+buffer. Boundary restrictions: `messages ≥ 1`; unique header keys and non-negative capacity as in
+r2.1.
+
+### Theorem statements (freeze candidates)
+
+```lean
+-- SA1 frame
+theorem reachableSub_core {s : SubState} (h : ReachableSub s) : Reachable s.core
+
+-- SA2 / SA3 invariant and T14′-safety
+theorem stateInv_reachable {s : SubState} (h : ReachableSub s) : StateInv s
+theorem pending_le_capacity {s : SubState} (h : ReachableSub s) :
+    ∀ p ∈ s.subs, p.2.pending.length ≤ p.2.policy.capacity
+
+-- SA4 registration and selectReplay
+theorem register_observed {s s' : SubState} {stream opts l₀ id}
+    (h : apply s (.register stream opts l₀ id (.ok .unit)) = some s') :
+    ∃ st, lookupStream s.core stream = some st ∧
+      lookupSub s'.subs id = some (newSubscriber stream opts l₀ st.messages)
+theorem selectReplay_mem {messages opts m} (h : m ∈ selectReplay messages opts) :
+    m ∈ messages ∧ matchesAny opts.filters m.subject = true
+theorem selectReplay_lastPerSubject {messages opts} (h : opts.start = .lastPerSubject) :
+    ∀ m ∈ selectReplay messages opts,
+      lastForSubject (messages.filter (fun x => matchesAny opts.filters x.subject)) m.subject = some m
+
+-- SA5 the consumer-visible sequence (T8′/T9/T10/T11 as per-transition equations)
+theorem pull_visible {s s' id sub sub'} (h : apply s (.pull id) = some s')
+    (hb : lookupSub s.subs id = some sub) (ha : lookupSub s'.subs id = some sub')
+    (ho : sub.status = .opened) : visible sub' = visible sub
+theorem publish_visible {s stream subject payload headers x now seq s' id sub sub'}
+    (h : apply s (.op (.publish stream subject payload headers x now) (.ok (.sequence seq))) = some s')
+    (hb : lookupSub s.subs id = some sub) (ha : lookupSub s'.subs id = some sub')
+    (hr : sub.registered = true) (ho : sub.status = .opened) (hs : sub.stream = stream)
+    (hm : matchesAny sub.filters subject = true) :
+    (sub.pending.length < sub.policy.capacity →
+        visible sub' = visible sub ++ [.entry { subject, sequence := seq, payload, headers,
+                                                timestampMillis := now }]) ∧
+    (sub.pending.length = sub.policy.capacity → visible sub' = visible sub ∧ sub'.registered = false)
+theorem op_visible_frame {s o e s' id sub sub'} (h : apply s (.op o e) = some s')
+    (hb : lookupSub s.subs id = some sub) (ha : lookupSub s'.subs id = some sub')
+    (hnm : ∀ stream subject payload headers x now, o = .publish stream subject payload headers x now →
+        (sub.stream ≠ stream ∨ matchesAny sub.filters subject = false))
+    (hnd : ∀ name, o ≠ .deleteStream name) : visible sub' = visible sub
+theorem visible_sequences_strict {s : SubState} (h : ReachableSub s) :
+    ∀ p ∈ s.subs, (entrySequences (visible p.2)).Pairwise (· < ·)
+
+-- SA6 T12′
+theorem delete_ends {s name s' id sub sub'} (h : apply s (.op (.deleteStream name) (.ok .unit)) = some s')
+    (hb : lookupSub s.subs id = some sub) (ha : lookupSub s'.subs id = some sub')
+    (hr : sub.registered = true) (hs : sub.stream = name) :
+    sub'.registered = false ∧
+      (sub'.status = .closing (.streamNotFound name) ∨ sub'.status = .done (.streamNotFound name)) ∧
+      visible sub' = visible sub
+theorem create_restarts {s raw s' st} (h : apply s (.op (.createStream raw) (.ok .unit)) = some s')
+    (habsent : lookupStream s.core raw.name = none) (hst : lookupStream s'.core raw.name = some st) :
+    st.nextSequence = 1
+
+-- SA7 T13′
+theorem lagged_iff {s stream subject payload headers x now seq s' id sub sub' n}
+    (h : apply s (.op (.publish stream subject payload headers x now) (.ok (.sequence seq))) = some s')
+    (hb : lookupSub s.subs id = some sub) (ha : lookupSub s'.subs id = some sub')
+    (hp : sub.policy = .terminateOnLag n) (hr : sub.registered = true) (hs : sub.stream = stream)
+    (hm : matchesAny sub.filters subject = true) :
+    (sub'.status = .closing (.consumerLagged stream sub.lastEnqueued) ∨
+     sub'.status = .done (.consumerLagged stream sub.lastEnqueued)) ↔ sub.pending.length = n
+theorem lagged_carries_last_observed {s : SubState} (h : ReachableSub s) :
+    ∀ p ∈ s.subs, ∀ stream n, p.2.observed.getLast? = some (.failed (.consumerLagged stream n)) →
+      (entrySequences p.2.observed).getLast? = some n ∨
+        (n = p.2.lastEnqueued ∧ ∀ m, Observed.entry m ∉ p.2.observed)
+
+-- traces (already proved, SubTraces.lean): sa_replay_trace … sa_drain_trace, all_sub_traces,
+-- w1_fails_drain, w2_fails_lag, w1_passes_replay, w2_passes_drain
+```
+
+Witnesses: the eight traces of `SubTraces.lean` (C7–C10, C13–C15, M1, and the Q1 witness);
+counterexamples: W1 (one-element pull) and W2 (advance on overflow) through the same runner.
+Approved edit regions after ratification: proof bodies in `SubProofs.lean` and proved helper
+lemmas; changing any declaration above or a statement returns to the slice document.
