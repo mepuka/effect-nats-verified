@@ -712,4 +712,480 @@ theorem rtWake_invAux {s s' : RtState} {id : SubId}
         rw [hw] at h
         simp at h
 
+/-! ## `check`, `resolve`, `endFanOut` -/
+
+/-- `RtSubInv` under a fan-out change: only `registeredStream`'s exemption reads the fan-out. -/
+theorem rtSubInv_fanOut {s : RtState} (s' : RtState) {r : RtSubscriber} (hcore : s'.core = s.core)
+    (hnd : ∀ name, s.fanOut.map FanOut.kind = some (.delete name) →
+      s'.fanOut.map FanOut.kind = some (.delete name))
+    (h : RtSubInv s r) : RtSubInv s' r := by
+  refine ⟨h.capacityPos, h.queue, h.registeredOpen, h.closeStartedOpen, ?_⟩
+  intro hr hn
+  rw [hcore]
+  exact h.registeredStream hr (fun name hc => hn name (hnd name hc))
+
+theorem queue_fail_ne_shutDown {q : EffectQueue} (e : SubError) (h : q.status ≠ .shutDown) :
+    (q.fail e).status ≠ .shutDown := by
+  unfold EffectQueue.fail
+  cases hs : q.status with
+  | opened =>
+    by_cases hb : q.buffer.isEmpty = true <;> simp [hb] <;> intro hc <;>
+      exact QueueStatus.noConfusion hc
+  | closing e' => rw [hs] at h ⊢; exact h
+  | done e' => rw [hs] at h ⊢; exact h
+  | shutDown => exact absurd hs h
+
+theorem queueInv_fail {cap : Nat} {q : EffectQueue} (hq : QueueInv cap q) (e : SubError) :
+    QueueInv cap (q.fail e) := by
+  unfold EffectQueue.fail
+  cases hs : q.status with
+  | opened =>
+    by_cases hb : q.buffer.isEmpty = true
+    · simp only [hb, if_true]
+      exact ⟨fun _ hc => QueueStatus.noConfusion hc, fun e' _ => List.isEmpty_iff.mp hb,
+        fun e' he => QueueStatus.noConfusion he, fun hc => QueueStatus.noConfusion hc,
+        hq.capacity⟩
+    · simp only [hb, if_false]
+      exact ⟨fun _ hc => QueueStatus.noConfusion hc, fun e' he => QueueStatus.noConfusion he,
+        fun e' _ hnil => hb (by rw [show q.buffer = [] from hnil]; rfl),
+        fun hc => QueueStatus.noConfusion hc, hq.capacity⟩
+  | closing e' => exact hq
+  | done e' => exact hq
+  | shutDown => exact hq
+
+theorem queueInv_offer {cap : Nat} {q q' : EffectQueue} {m : StoredMessage}
+    {res : EffectQueue.OfferResult}
+    (hq : QueueInv cap q) (hoff : q.offer cap m = (q', res)) (hres : res ≠ .wouldSuspend) :
+    QueueInv cap q' ∧ q'.status = q.status ∧ q'.taker = q.taker := by
+  by_cases hop : q.status = .opened
+  · by_cases hr : q.buffer.length < cap
+    · rw [offer_admits cap q m hop hr] at hoff
+      injection hoff with h1 h2
+      subst h1
+      have hst : ({ q with buffer := q.buffer ++ [m] } : EffectQueue).status = .opened := hop
+      refine ⟨⟨fun _ hc => by rw [hst] at hc; exact QueueStatus.noConfusion hc,
+        fun e he => by rw [hst] at he; exact QueueStatus.noConfusion he,
+        fun e he => by rw [hst] at he; exact QueueStatus.noConfusion he,
+        fun hc => by rw [hst] at hc; exact QueueStatus.noConfusion hc, ?_⟩, rfl, rfl⟩
+      show (q.buffer ++ [m]).length ≤ cap
+      rw [List.length_append]
+      exact hr
+    · unfold EffectQueue.offer at hoff
+      rw [hop, if_neg hr] at hoff
+      injection hoff with h1 h2
+      exact absurd h2.symm hres
+  · rw [offer_refused cap q m hop] at hoff
+    injection hoff with h1 h2
+    subst h1
+    exact ⟨hq, rfl, rfl⟩
+
+theorem rtCheck_invAux {s s' : RtState} {id : SubId}
+    (hinv : RtInv s) (haux : RtAux s) (h : rtCheck s id = some s') :
+    RtInv s' ∧ RtAux s' := by
+  unfold rtCheck at h
+  cases hfan : s.fanOut with
+  | none => simp only [hfan] at h; simp at h
+  | some f =>
+    simp only [hfan] at h
+    cases hk : f.kind with
+    | delete name => simp only [hk] at h; simp at h
+    | publish stream m el =>
+      cases hd : f.decided with
+      | some p => simp only [hk, hd] at h; simp at h
+      | none =>
+        cases hrem : f.remaining with
+        | nil => simp only [hk, hd, hrem] at h; simp at h
+        | cons i rest =>
+          simp only [hk, hd, hrem] at h
+          split at h
+          · simp at h
+          · rename_i hii
+            have hii2 : i = id := Classical.byContradiction hii
+            subst hii2
+            cases hlook : lookupRt s.subs i with
+            | none => simp only [hlook] at h; simp at h
+            | some r =>
+              simp only [hlook] at h
+              obtain ⟨n, hn⟩ : ∃ n, r.policy = .terminateOnLag n := by
+                cases hp : r.policy with
+                | terminateOnLag n => exact ⟨n, rfl⟩
+              simp only [hn] at h
+              cases h
+              rw [← hk]
+              have hf0 := hinv.fanOut f hfan
+              have hax := haux f hfan
+              have hnodup : (i :: rest).Nodup := by rw [← hrem]; exact hf0.remainingNodup
+              have hinot : i ∉ rest := by
+                intro hm
+                exact (List.pairwise_cons.mp hnodup).1 i hm rfl
+              have hnd : ∀ name, s.fanOut.map FanOut.kind = some (.delete name) →
+                  (some { f with
+                    remaining := rest,
+                    decided := some (i, decide (n ≤ r.queue.size)) }).map FanOut.kind =
+                      some (.delete name) := by
+                intro name hc
+                simp [hfan, hk] at hc
+              refine ⟨⟨?_, hinv.shape, ?_, hinv.core⟩, ?_⟩
+              · intro q hq
+                exact rtSubInv_fanOut (s := s) _ rfl hnd (hinv.subs q hq)
+              · intro g hg
+                have hg2 : some { f with
+                    remaining := rest,
+                    decided := some (i, decide (n ≤ r.queue.size)) } = some g := hg
+                obtain rfl := Option.some.inj hg2
+                refine ⟨?_, ?_, ?_, ?_, ?_⟩
+                · show rest.Nodup
+                  exact (List.pairwise_cons.mp hnodup).2
+                · intro j hj
+                  exact hf0.remainingKnown j (by rw [hrem]; exact List.Mem.tail _ hj)
+                · intro j b hb
+                  injection hb with hb2
+                  injection hb2 with hji _
+                  rw [← hji]
+                  exact hinot
+                · intro j b hb
+                  injection hb with hb2
+                  injection hb2 with hji _
+                  rw [← hji, hlook]
+                  rfl
+                · intro j hb rv hrv
+                  injection hb with hb2
+                  injection hb2 with hji hjb
+                  rw [← hji, hlook] at hrv
+                  cases hrv
+                  by_cases hop : r.queue.status = QueueStatus.opened
+                  · refine Or.inl ?_
+                    rw [hn]
+                    show r.queue.buffer.length < n
+                    rw [← size_eq_length r.queue (Or.inl hop)]
+                    exact Nat.lt_of_not_le (fun hle => by
+                      rw [decide_eq_true hle] at hjb; exact Bool.noConfusion hjb)
+                  · exact Or.inr hop
+              · intro g hg
+                have hg2 : some { f with
+                    remaining := rest,
+                    decided := some (i, decide (n ≤ r.queue.size)) } = some g := hg
+                obtain rfl := Option.some.inj hg2
+                refine ⟨?_, ?_⟩
+                · intro stream' m' el' hk'
+                  obtain ⟨hex, hmem⟩ := hax.publish stream' m' el' hk'
+                  refine ⟨hex, ?_⟩
+                  intro j hj rv hrv
+                  refine hmem j ?_ rv hrv
+                  rcases hj with hj | ⟨b, hb⟩ | ⟨o, ho⟩
+                  · exact Or.inl (by rw [hrem]; exact List.Mem.tail _ hj)
+                  · injection hb with hb2
+                    injection hb2 with hji _
+                    exact Or.inl (by rw [hrem, ← hji]; exact List.Mem.head _)
+                  · exact Or.inr (Or.inr ⟨o, ho⟩)
+                · intro name hk'
+                  rw [hk] at hk'
+                  exact absurd hk' (fun hcc => FanKind.noConfusion hcc)
+
+theorem rtEndFanOut_invAux {s s' : RtState}
+    (hinv : RtInv s) (haux : RtAux s) (h : rtEndFanOut s = some s') :
+    RtInv s' ∧ RtAux s' := by
+  unfold rtEndFanOut at h
+  cases hfan : s.fanOut with
+  | none => simp only [hfan] at h; simp at h
+  | some f =>
+    simp only [hfan] at h
+    split at h
+    · rename_i hg
+      cases h
+      simp only [Bool.and_eq_true] at hg
+      have hrem : f.remaining = [] := List.isEmpty_iff.mp hg.1
+      have hax := haux f hfan
+      refine ⟨⟨?_, hinv.shape, ?_, hinv.core⟩, ?_⟩
+      · intro p hp
+        have hp0 := hinv.subs p hp
+        refine ⟨hp0.capacityPos, hp0.queue, hp0.registeredOpen, hp0.closeStartedOpen, ?_⟩
+        intro hr _
+        cases hk : f.kind with
+        | publish stream m el =>
+          refine hp0.registeredStream hr ?_
+          intro name hc
+          simp [hfan, hk] at hc
+        | delete name =>
+          obtain ⟨gone, cover, others⟩ := hax.delete name hk
+          have hlk : lookupRt s.subs p.1 = some p.2 :=
+            lookupRt_of_mem_pairwise s.subs p.1 p.2 hinv.shape.1 hp
+          by_cases hsn : p.2.stream = name
+          · exfalso
+            have hmem := cover p.1 p.2 hlk hr hsn
+            rw [hrem] at hmem
+            cases hmem
+          · exact others p.1 p.2 hlk hr hsn
+      · intro g hg2
+        cases hg2
+      · intro g hg2
+        cases hg2
+    · simp at h
+
+/-- The state-level plumbing of a `resolve` on a publish fan-out: the visited subscriber is
+rewritten and moves from `decided` to `visited`. -/
+theorem rtInvAux_resolvePublish {s : RtState} {f : FanOut} {i : SubId} {r c : RtSubscriber}
+    {o : Outcome} {stream : StreamName} {m : StoredMessage} {el : Option StreamSeq}
+    (hinv : RtInv s) (hax : FanAux s f) (hfan : s.fanOut = some f)
+    (hk : f.kind = .publish stream m el)
+    (hlook : lookupRt s.subs i = some r) (hd : ∃ b, f.decided = some (i, b))
+    (hsub : RtSubInv s c) (hcstream : c.stream = r.stream) :
+    RtInv { s with
+        subs := updateRt s.subs i (fun _ => c),
+        fanOut := some { f with decided := none, visited := f.visited ++ [(i, o)] } } ∧
+      RtAux { s with
+        subs := updateRt s.subs i (fun _ => c),
+        fanOut := some { f with decided := none, visited := f.visited ++ [(i, o)] } } := by
+  have hf0 := hinv.fanOut f hfan
+  have hnd : ∀ name, s.fanOut.map FanOut.kind = some (.delete name) →
+      (some { f with decided := none, visited := f.visited ++ [(i, o)] }).map FanOut.kind =
+        some (.delete name) := by
+    intro name hc
+    simp [hfan, hk] at hc
+  refine ⟨⟨?_, rtShape_update hinv i _, ?_, hinv.core⟩, ?_⟩
+  · intro q hq
+    obtain ⟨k, v⟩ := q
+    rcases mem_updateRt hq with hmem | ⟨hkid, u, h0, hv⟩
+    · exact rtSubInv_fanOut (s := s) _ rfl hnd (hinv.subs _ hmem)
+    · rw [hv]
+      exact rtSubInv_fanOut (s := s) _ rfl hnd hsub
+  · intro g hg
+    have hg2 : some { f with decided := none, visited := f.visited ++ [(i, o)] } = some g := hg
+    obtain rfl := Option.some.inj hg2
+    refine ⟨hf0.remainingNodup, ?_, ?_, ?_, ?_⟩
+    · intro j hj
+      exact lookupRt_updateRt_isSome s.subs i j _ (hf0.remainingKnown j hj)
+    · intro j b hb
+      cases hb
+    · intro j b hb
+      cases hb
+    · intro j hb rv hrv
+      cases hb
+  · intro g hg
+    have hg2 : some { f with decided := none, visited := f.visited ++ [(i, o)] } = some g := hg
+    obtain rfl := Option.some.inj hg2
+    refine ⟨?_, ?_⟩
+    · intro stream' m' el' hk'
+      obtain ⟨hex, hmem⟩ := hax.publish stream' m' el' hk'
+      refine ⟨hex, ?_⟩
+      intro j hj rv hrv
+      by_cases hji : j = i
+      · subst hji
+        obtain ⟨u, hu, heq⟩ := lookupRt_updateRt_eq (g := fun _ => c) hrv
+        have huu : u = r := Option.some.inj (hu.symm.trans hlook)
+        rw [heq]
+        show c.stream = stream'
+        rw [hcstream, ← huu]
+        obtain ⟨b, hb⟩ := hd
+        exact hmem j (Or.inr (Or.inl ⟨b, hb⟩)) u hu
+      · have hlk : lookupRt s.subs j = some rv :=
+          lookupRt_updateRt_neq s.subs i j _ hji hrv
+        refine hmem j ?_ rv hlk
+        rcases hj with hj | ⟨b, hb⟩ | ⟨o', ho'⟩
+        · exact Or.inl hj
+        · cases hb
+        · rcases List.mem_append.mp ho' with hm | hm
+          · exact Or.inr (Or.inr ⟨o', hm⟩)
+          · exfalso
+            rcases List.mem_singleton.mp hm with he
+            injection he with he1
+            exact hji he1
+    · intro name hk'
+      rw [hk] at hk'
+      exact absurd hk' (fun hcc => FanKind.noConfusion hcc)
+
+theorem rtResolve_invAux {s s' : RtState} {id : SubId}
+    (hinv : RtInv s) (haux : RtAux s) (h : rtResolve s id = some s') :
+    RtInv s' ∧ RtAux s' := by
+  unfold rtResolve at h
+  cases hfan : s.fanOut with
+  | none => simp only [hfan] at h; simp at h
+  | some f =>
+    simp only [hfan] at h
+    have hf0 := hinv.fanOut f hfan
+    have hax := haux f hfan
+    cases hk : f.kind with
+    | publish stream m el =>
+      simp only [hk] at h
+      cases hd : f.decided with
+      | none => simp only [hd] at h; simp at h
+      | some p =>
+        obtain ⟨i, ovf⟩ := p
+        simp only [hd] at h
+        split at h
+        · simp at h
+        · rename_i hii
+          have hii2 : i = id := Classical.byContradiction hii
+          subst hii2
+          cases hlook : lookupRt s.subs i with
+          | none => simp only [hlook] at h; simp at h
+          | some r =>
+            simp only [hlook] at h
+            have hrs := hinv.subs (i, r) (mem_of_lookupRt _ _ _ hlook)
+            have hstream : r.stream = stream :=
+              (hax.publish stream m el hk).2 i (Or.inr (Or.inl ⟨ovf, hd⟩)) r hlook
+            cases ovf with
+            | true =>
+              simp only [if_true] at h
+              cases h
+              rw [← hk]
+              refine rtInvAux_resolvePublish (o := .overflowed) hinv hax hfan hk hlook
+                ⟨true, hd⟩ ?_ rfl
+              refine ⟨hrs.capacityPos, queueInv_fail hrs.queue _,
+                fun hr => Bool.noConfusion hr, ?_, fun hr => Bool.noConfusion hr⟩
+              intro hcs
+              exact ⟨rfl, queue_fail_ne_shutDown _ (hrs.closeStartedOpen hcs).2⟩
+            | false =>
+              cases hoff : r.queue.offer r.policy.capacity m with
+              | mk q' res =>
+                simp only [hoff] at h
+                cases res with
+                | wouldSuspend => simp at h
+                | accepted =>
+                  simp only [] at h
+                  cases h
+                  rw [← hk]
+                  refine rtInvAux_resolvePublish (o := .admitted) hinv hax hfan hk hlook
+                    ⟨false, hd⟩ ?_ rfl
+                  obtain ⟨hqi, hst, htk⟩ := queueInv_offer hrs.queue hoff
+                    (fun hc => EffectQueue.OfferResult.noConfusion hc)
+                  refine ⟨hrs.capacityPos, hqi, ?_, ?_, ?_⟩
+                  · intro hr
+                    exact ⟨by rw [hst]; exact (hrs.registeredOpen hr).1,
+                      (hrs.registeredOpen hr).2⟩
+                  · intro hcs
+                    exact ⟨(hrs.closeStartedOpen hcs).1,
+                      by rw [hst]; exact (hrs.closeStartedOpen hcs).2⟩
+                  · intro hr _
+                    show ∃ st, lookupStream s.core r.stream = some st ∧
+                      m.sequence < st.nextSequence
+                    rw [hstream]
+                    exact (hax.publish stream m el hk).1
+                | refused =>
+                  simp only [] at h
+                  cases h
+                  rw [← hk]
+                  refine rtInvAux_resolvePublish (o := .skipped) hinv hax hfan hk hlook
+                    ⟨false, hd⟩ ?_ rfl
+                  obtain ⟨hqi, hst, htk⟩ := queueInv_offer hrs.queue hoff
+                    (fun hc => EffectQueue.OfferResult.noConfusion hc)
+                  refine ⟨hrs.capacityPos, hqi, ?_, ?_, ?_⟩
+                  · intro hr
+                    exact ⟨by rw [hst]; exact (hrs.registeredOpen hr).1,
+                      (hrs.registeredOpen hr).2⟩
+                  · intro hcs
+                    exact ⟨(hrs.closeStartedOpen hcs).1,
+                      by rw [hst]; exact (hrs.closeStartedOpen hcs).2⟩
+                  · intro hr _
+                    show ∃ st, lookupStream s.core r.stream = some st ∧
+                      m.sequence < st.nextSequence
+                    rw [hstream]
+                    exact (hax.publish stream m el hk).1
+    | delete name =>
+      simp only [hk] at h
+      cases hd : f.decided with
+      | some p => simp only [hd] at h; simp at h
+      | none =>
+        cases hrem : f.remaining with
+        | nil => simp only [hd, hrem] at h; simp at h
+        | cons i rest =>
+          simp only [hd, hrem] at h
+          split at h
+          · simp at h
+          · rename_i hii
+            have hii2 : i = id := Classical.byContradiction hii
+            subst hii2
+            cases hlook : lookupRt s.subs i with
+            | none => simp only [hlook] at h; simp at h
+            | some r =>
+              simp only [hlook] at h
+              cases h
+              rw [← hk]
+              have hrs := hinv.subs (i, r) (mem_of_lookupRt _ _ _ hlook)
+              obtain ⟨gone, cover, others⟩ := hax.delete name hk
+              have hnodup : (i :: rest).Nodup := by rw [← hrem]; exact hf0.remainingNodup
+              have hinot : i ∉ rest := by
+                intro hm
+                exact (List.pairwise_cons.mp hnodup).1 i hm rfl
+              have hnd : ∀ nm, s.fanOut.map FanOut.kind = some (.delete nm) →
+                  (some { f with
+                    remaining := rest, decided := none,
+                    visited := f.visited ++ [(i, Outcome.ended)] }).map FanOut.kind =
+                      some (.delete nm) := by
+                intro nm hc
+                simp only [hfan, Option.map_some, hk] at hc
+                simp only [Option.map_some, hk]
+                exact hc
+              have hsub : RtSubInv s
+                  { r with registered := false,
+                           queue := r.queue.fail (.streamNotFound name) } := by
+                refine ⟨hrs.capacityPos, queueInv_fail hrs.queue _,
+                  fun hr => Bool.noConfusion hr, ?_, fun hr => Bool.noConfusion hr⟩
+                intro hcs
+                exact ⟨rfl, queue_fail_ne_shutDown _ (hrs.closeStartedOpen hcs).2⟩
+              refine ⟨⟨?_, rtShape_update hinv i _, ?_, hinv.core⟩, ?_⟩
+              · intro q hq
+                obtain ⟨k, v⟩ := q
+                rcases mem_updateRt hq with hmem | ⟨hkid, u, h0, hv⟩
+                · exact rtSubInv_fanOut (s := s) _ rfl hnd (hinv.subs _ hmem)
+                · rw [hv]
+                  exact rtSubInv_fanOut (s := s) _ rfl hnd hsub
+              · intro g hg
+                have hg2 : some { f with
+                    remaining := rest, decided := none,
+                    visited := f.visited ++ [(i, Outcome.ended)] } = some g := hg
+                obtain rfl := Option.some.inj hg2
+                refine ⟨?_, ?_, ?_, ?_, ?_⟩
+                · show rest.Nodup
+                  exact (List.pairwise_cons.mp hnodup).2
+                · intro j hj
+                  exact lookupRt_updateRt_isSome s.subs i j _
+                    (hf0.remainingKnown j (by rw [hrem]; exact List.Mem.tail _ hj))
+                · intro j b hb
+                  cases hb
+                · intro j b hb
+                  cases hb
+                · intro j hb rv hrv
+                  cases hb
+              · intro g hg
+                have hg2 : some { f with
+                    remaining := rest, decided := none,
+                    visited := f.visited ++ [(i, Outcome.ended)] } = some g := hg
+                obtain rfl := Option.some.inj hg2
+                refine ⟨?_, ?_⟩
+                · intro stream' m' el' hk'
+                  rw [hk] at hk'
+                  exact absurd hk' (fun hcc => FanKind.noConfusion hcc)
+                · intro nm hk'
+                  have hnm : nm = name := by
+                    rw [hk] at hk'
+                    injection hk' with hnm2
+                    exact hnm2.symm
+                  subst hnm
+                  refine ⟨gone, ?_, ?_⟩
+                  · intro j rv hrv hr hs
+                    by_cases hji : j = i
+                    · exfalso
+                      subst hji
+                      obtain ⟨u, hu, heq⟩ := lookupRt_updateRt_eq (g := fun _ => { r with registered := false, queue := r.queue.fail (.streamNotFound nm) }) hrv
+                      rw [heq] at hr
+                      exact Bool.noConfusion hr
+                    · have hlk : lookupRt s.subs j = some rv :=
+                        lookupRt_updateRt_neq s.subs i j _ hji hrv
+                      have hmem := cover j rv hlk hr hs
+                      rw [hrem] at hmem
+                      rcases List.mem_cons.mp hmem with he | hm
+                      · exact absurd he hji
+                      · exact hm
+                  · intro j rv hrv hr hs
+                    by_cases hji : j = i
+                    · exfalso
+                      subst hji
+                      obtain ⟨u, hu, heq⟩ := lookupRt_updateRt_eq (g := fun _ => { r with registered := false, queue := r.queue.fail (.streamNotFound nm) }) hrv
+                      rw [heq] at hr
+                      exact Bool.noConfusion hr
+                    · have hlk : lookupRt s.subs j = some rv :=
+                        lookupRt_updateRt_neq s.subs i j _ hji hrv
+                      exact others j rv hlk hr hs
+
 end EffectNatsSubstrate
