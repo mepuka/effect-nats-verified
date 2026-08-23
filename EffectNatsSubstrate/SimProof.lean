@@ -2503,4 +2503,918 @@ theorem rel_step_op {s s' : RtState} {o : Op} {e : Expect} (hinv : RtInv s)
                exact rel_op_plain hfan hrun hnext hkeys hcorr hhist hapA rfl rfl rfl)
 
 
+theorem noRegister_owed {f : FanOut} {owedRest : List Label} (hok : OwedOk f owedRest) :
+    NoRegister (owedOp f.kind :: owedRest) := by
+  intro l hl stream opts l₀ j e
+  rcases List.mem_cons.mp hl with he | hm
+  · subst he
+    exact owedOp_ne_register f.kind stream opts l₀ j e
+  · obtain ⟨i, hi, -⟩ := hok l hm
+    rcases hi with hi | hi <;> subst hi <;> intro hc <;> exact Label.noConfusion hc
+
+theorem consumerOnly_owedRest {f : FanOut} {owedRest : List Label} (hok : OwedOk f owedRest) :
+    ∀ l ∈ owedRest, ∃ j, l = .pull j ∨ l = .unsubscribe j := by
+  intro l hl
+  obtain ⟨i, hi, -⟩ := hok l hl
+  exact ⟨i, hi⟩
+
+/-- The owed suffix leaves the history of a subscriber whose point has not passed alone. -/
+theorem owed_hist_frame {f : FanOut} {owedRest : List Label} {id : SubId}
+    (hok : OwedOk f owedRest) (hnp : pointPassed f id = false) :
+    ∀ l ∈ owedOp f.kind :: owedRest, (∀ j, l = .pull j → j ≠ id) ∧
+      ∀ stream opts l₀ j e, l = .register stream opts l₀ j e → j ≠ id := by
+  intro l hl
+  rcases List.mem_cons.mp hl with he | hm
+  · subst he
+    exact ⟨fun j hc => absurd hc (owedOp_ne_pull f.kind j),
+      fun stream opts l₀ j e hc => absurd hc (owedOp_ne_register f.kind stream opts l₀ j e)⟩
+  · obtain ⟨i, hi, hpi⟩ := hok l hm
+    refine ⟨fun j hc => ?_, fun stream opts l₀ j e hc => ?_⟩
+    · rcases hi with hi | hi <;> subst hi
+      · cases hc
+        intro he
+        subst he
+        rw [hnp] at hpi
+        exact Bool.noConfusion hpi
+      · exact absurd hc (fun hcc => Label.noConfusion hcc)
+    · rcases hi with hi | hi <;> subst hi <;> exact absurd hc (fun hcc => Label.noConfusion hcc)
+
+theorem rel_step_endFanOut {s s' : RtState} (_hinv : RtInv s)
+    (hstep : rtEndFanOut s = some s') {labels owed : List Label}
+    (hrel : Rel s labels owed) (hhist : RelHist s labels owed) :
+    RelStep s' labels owed [] .endFanOut := by
+  unfold rtEndFanOut at hstep
+  cases hfan : s.fanOut with
+  | none => simp only [hfan] at hstep; simp at hstep
+  | some f =>
+    simp only [hfan] at hstep
+    split at hstep
+    · rename_i hg
+      cases hstep
+      simp only [Bool.and_eq_true] at hg
+      have hrem : f.remaining = [] := List.isEmpty_iff.mp hg.1
+      have hdec : f.decided = none := Option.isNone_iff_eq_none.mp hg.2
+      obtain ⟨sA, hrun, hnext, hkeys, -, hflight⟩ := hrel
+      obtain ⟨hfresh, hpre, hrcore, hcorrPre, owedRest, sPost, howed, howedOk, hrunPost,
+        hcorrPost⟩ := hflight f hfan
+      subst howed
+      have hnotSched : ∀ id, ¬ Scheduled f id := by
+        rintro id (hm | ⟨b, hb⟩)
+        · rw [hrem] at hm; cases hm
+        · rw [hdec] at hb; cases hb
+      have hrunAll : runLabels initialSub (labels ++ (owedOp f.kind :: owedRest)) = some sPost :=
+        (runLabels_append labels _ hrun).trans hrunPost
+      -- the owed operation lands on the runtime core
+      rw [runLabels_cons] at hrunPost
+      cases hap : apply sA (owedOp f.kind) with
+      | none => rw [hap] at hrunPost; cases hrunPost
+      | some sA₁ =>
+        rw [hap] at hrunPost
+        have hcore₁ : sA₁.core = s.core := by
+          cases hk : f.kind with
+          | publish stream m el =>
+            rw [hk] at hap
+            obtain ⟨core'', hst'', hs₁⟩ := applyOp_ok_eq (deliver := deliverOne)
+              (show applyOp deliverOne sA
+                (.publish stream m.subject m.payload m.headers el m.timestampMillis)
+                (.ok (.sequence m.sequence)) = some sA₁ from hap)
+            have := hrcore.1 stream m el hk
+            rw [hst''] at this
+            injection this with hthis
+            injection hthis with hcc _
+            rw [hs₁]
+            exact hcc
+          | delete name =>
+            rw [hk] at hap
+            obtain ⟨core'', hst'', hs₁⟩ := applyOp_ok_eq (deliver := deliverOne)
+              (show applyOp deliverOne sA (.deleteStream name) (.ok .unit) = some sA₁ from hap)
+            have := hrcore.2 name hk
+            rw [hst''] at this
+            injection this with hthis
+            injection hthis with hcc _
+            rw [hs₁]
+            exact hcc
+        obtain ⟨hcoreP, hnextP, hkeysP⟩ :=
+          runLabels_consumer_frame owedRest (consumerOnly_owedRest howedOk) hrunPost
+        obtain ⟨hnextAll, hkeysAll⟩ :=
+          runLabels_noRegister_frame (owedOp f.kind :: owedRest) (noRegister_owed howedOk)
+            (by rw [runLabels_cons, hap]; exact hrunPost)
+        refine ⟨labels ++ (owedOp f.kind :: owedRest), [],
+          ⟨sPost, hrunAll, ?_, ?_, ?_, ?_⟩, ?_, ?_, ?_⟩
+        · rw [hnextAll, hnext]
+        · rw [hkeysAll, hkeys]
+        · intro _
+          refine ⟨rfl, by rw [hcoreP, hcore₁], ?_⟩
+          intro id r₀ hlkr
+          cases hpp : pointPassed f id with
+          | true =>
+            obtain ⟨a, hlka, hca⟩ := hcorrPost id r₀ hlkr hpp
+            rw [pendingOf_eq, pendingFail_of_decided_none hdec] at hca
+            exact ⟨a, hlka, hca⟩
+          | false =>
+            obtain ⟨a, hlka, hca⟩ := hcorrPre id r₀ hlkr hpp
+            obtain ⟨hpub, hdel⟩ := owed_lookup (f := f) (by rw [runLabels_cons, hap]; exact hrunPost)
+              howedOk hpp hlka
+            refine ⟨a, ?_, hca⟩
+            have htgt : isTargetOf f.kind a = false := by
+              rcases (hpre id a hlka hpp).1 with hs | ht
+              · exact absurd hs (hnotSched id)
+              · exact ht
+            cases hk : f.kind with
+            | publish stream m el =>
+              rw [hpub stream m el hk]
+              rw [hk] at htgt
+              rw [deliverOne_skip htgt]
+            | delete name =>
+              rw [hdel name hk]
+              rw [hk] at htgt
+              rw [endOne_skip htgt]
+        · intro g hg'
+          cases hg'
+        · intro id hsome
+          refine ⟨fun _ => ?_, fun g hg' => by cases hg'⟩
+          obtain ⟨-, hf⟩ := hhist id hsome
+          obtain ⟨hpass, hnpass⟩ := hf f hfan
+          cases hpp : pointPassed f id with
+          | true => exact hpass hpp
+          | false =>
+            rw [abstractHistory_append id labels (owedOp f.kind :: owedRest) hrun (hnpass hpp)]
+            exact abstractHistoryFrom_frame id (owedOp f.kind :: owedRest)
+              (owed_hist_frame howedOk hpp) (by rw [runLabels_cons, hap]; exact hrunPost)
+        · rw [labelSerial_append]
+          simp [labelSerial]
+        · intro _ hnl hno
+          exact ⟨noUnsub_append hnl hno, fun l hl => by cases hl⟩
+    · cases hstep
+
+
+theorem pointPassed_of_decided_none {f : FanOut} (hdec : f.decided = none) (j : SubId) :
+    pointPassed f j = f.visited.any (fun p => p.1 == j) := by
+  unfold pointPassed
+  rw [hdec]
+  simp
+
+theorem pointPassed_check_admit {f : FanOut} {i : SubId} {rest : List SubId}
+    (hdec : f.decided = none) (j : SubId) :
+    pointPassed { f with remaining := rest, decided := some (i, false) } j = pointPassed f j := by
+  unfold pointPassed
+  rw [hdec]
+  simp
+
+theorem pointPassed_check_overflow_self {f : FanOut} {i : SubId} {rest : List SubId} :
+    pointPassed { f with remaining := rest, decided := some (i, true) } i = true := by
+  unfold pointPassed
+  simp
+
+theorem pointPassed_check_overflow_ne {f : FanOut} {i : SubId} {rest : List SubId}
+    (hdec : f.decided = none) {j : SubId} (hji : j ≠ i) :
+    pointPassed { f with remaining := rest, decided := some (i, true) } j = pointPassed f j := by
+  unfold pointPassed
+  rw [hdec]
+  have : ¬ (i = j) := fun h => hji h.symm
+  simp [this]
+
+
+theorem rel_step_check {s s' : RtState} {id : SubId} (hinv : RtInv s)
+    (hstep : rtCheck s id = some s') {labels owed : List Label}
+    (hrel : Rel s labels owed) (hhist : RelHist s labels owed) :
+    RelStep s' labels owed [] (.check id) := by
+  unfold rtCheck at hstep
+  cases hfan : s.fanOut with
+  | none => simp only [hfan] at hstep; simp at hstep
+  | some f =>
+    simp only [hfan] at hstep
+    cases hk : f.kind with
+    | delete name => simp only [hk] at hstep; simp at hstep
+    | publish stream m el =>
+      cases hdec : f.decided with
+      | some p => simp only [hk, hdec] at hstep; simp at hstep
+      | none =>
+        cases hrem : f.remaining with
+        | nil => simp only [hk, hdec, hrem] at hstep; simp at hstep
+        | cons i rest =>
+          simp only [hk, hdec, hrem] at hstep
+          split at hstep
+          · simp at hstep
+          · rename_i hii
+            have hii' : i = id := Classical.byContradiction hii
+            subst hii'
+            cases hlk : lookupRt s.subs i with
+            | none => simp only [hlk] at hstep; simp at hstep
+            | some r =>
+              simp only [hlk] at hstep
+              obtain ⟨n, hn⟩ : ∃ n, r.policy = .terminateOnLag n := by
+                cases hp : r.policy with
+                | terminateOnLag n => exact ⟨n, rfl⟩
+              simp only [hn] at hstep
+              cases hstep
+              rw [← hk]
+              obtain ⟨sA, hrun, hnext, hkeys, -, hflight⟩ := hrel
+              obtain ⟨hfresh, hpre, hrcore, hcorrPre, owedRest, sPost, howed, howedOk, hrunPost,
+                hcorrPost⟩ := hflight f hfan
+              subst howed
+              have hsub := rtSubInv_of_lookup hinv hlk
+              have hro : r.registered = true → r.queue.status = .opened :=
+                fun hb => (hsub.registeredOpen hb).1
+              have hnpi : pointPassed f i = false := by
+                rw [pointPassed_of_decided_none hdec]
+                exact hfresh i (Or.inl (by rw [hrem]; exact List.Mem.head _))
+              have hschedNew : ∀ j, Scheduled f j ↔ (j ∈ rest ∨ j = i) := by
+                intro j
+                constructor
+                · rintro (hm | ⟨b, hb⟩)
+                  · rw [hrem] at hm
+                    rcases List.mem_cons.mp hm with he | hm'
+                    · exact Or.inr he
+                    · exact Or.inl hm'
+                  · rw [hdec] at hb; cases hb
+                · rintro (hm | he)
+                  · exact Or.inl (by rw [hrem]; exact List.Mem.tail _ hm)
+                  · exact Or.inl (by rw [hrem, he]; exact List.Mem.head _)
+              have hserial : labelSerial labels ++ labelSerial (owedOp f.kind :: owedRest)
+                  = labelSerial labels ++ labelSerial (owedOp f.kind :: owedRest) ++ [] := by
+                rw [List.append_nil]
+              by_cases hovf : n ≤ r.queue.size
+              · -- overflow: `i` passes its point here
+                rw [decide_eq_true hovf]
+                have hppSelf := pointPassed_check_overflow_self (f := f) (i := i) (rest := rest)
+                have hppNe := fun {j : SubId} (hji : j ≠ i) =>
+                  pointPassed_check_overflow_ne (f := f) (i := i) (rest := rest) hdec hji
+                obtain ⟨aPre, hlkaPre, hcaPre⟩ := hcorrPre i r hlk hnpi
+                have htgt : aPre.status = .shutDown ∨ isTargetOf f.kind aPre = true :=
+                  (hpre i aPre hlkaPre hnpi).2 (Or.inl (by rw [hrem]; exact List.Mem.head _))
+                rw [hk] at htgt
+                obtain ⟨hpub, -⟩ := owed_lookup (f := f) hrunPost howedOk hnpi hlkaPre
+                have hlkPost : lookupSub sPost.subs i = some (deliverOne stream m aPre) :=
+                  hpub stream m el hk
+                have hcorrNew : corrSub (rtFail (.consumerLagged stream r.lastEnqueued) r)
+                    (deliverOne stream m aPre) := overflow_corr hn hro htgt hovf hcaPre
+                refine ⟨labels, owedOp f.kind :: owedRest,
+                  ⟨sA, hrun, hnext, hkeys, (fun hq => by cases hq), ?_⟩, ?_, hserial,
+                  fun _ hnl hno => ⟨hnl, hno⟩⟩
+                · intro g hg
+                  have hg2 : some { f with remaining := rest, decided := some (i, true) }
+                    = some g := hg
+                  obtain rfl : { f with remaining := rest, decided := some (i, true) } = g :=
+                    Option.some.inj hg2
+                  refine ⟨?_, ?_, ?_, ?_, owedRest, sPost, rfl, ?_, hrunPost, ?_⟩
+                  · intro j hs
+                    rcases hs with hm | ⟨b, hb⟩
+                    · exact hfresh j (Or.inl (by rw [hrem]; exact List.Mem.tail _ hm))
+                    · injection hb with hb2
+                      injection hb2 with hij _
+                      rw [← hij]
+                      exact hfresh i (Or.inl (by rw [hrem]; exact List.Mem.head _))
+                  · intro j a hlka hnp
+                    have hji : j ≠ i := by
+                      intro he
+                      rw [he, hppSelf] at hnp
+                      exact Bool.noConfusion hnp
+                    rw [hppNe hji] at hnp
+                    obtain ⟨h1, h2⟩ := hpre j a hlka hnp
+                    constructor
+                    · rcases h1 with hs | ht
+                      · refine Or.inl (Or.inl ?_)
+                        rcases (hschedNew j).mp hs with hm | he
+                        · exact hm
+                        · exact absurd he hji
+                      · exact Or.inr ht
+                    · intro hs
+                      refine h2 ((hschedNew j).mpr ?_)
+                      rcases hs with hm | ⟨b, hb⟩
+                      · exact Or.inl hm
+                      · injection hb with hb2
+                        injection hb2 with hij _
+                        exact Or.inr hij.symm
+                  · exact hrcore
+                  · intro j r0 hlkr hnp
+                    have hji : j ≠ i := by
+                      intro he
+                      rw [he, hppSelf] at hnp
+                      exact Bool.noConfusion hnp
+                    rw [hppNe hji] at hnp
+                    exact hcorrPre j r0 hlkr hnp
+                  · intro l hl
+                    obtain ⟨j, hj, hpj⟩ := howedOk l hl
+                    refine ⟨j, hj, ?_⟩
+                    by_cases hji : j = i
+                    · subst hji
+                      exact hppSelf
+                    · rw [hppNe hji]
+                      exact hpj
+                  · intro j r0 hlkr hp
+                    by_cases hji : j = i
+                    · refine ⟨deliverOne stream m aPre, by rw [hji]; exact hlkPost, ?_⟩
+                      have hr0 : r0 = r := by
+                        rw [hji] at hlkr
+                        exact Option.some.inj (hlkr.symm.trans hlk)
+                      rw [hr0, hji]
+                      show corrSub (failOpt (pendingFail
+                        { f with remaining := rest, decided := some (i, true) } i r) r) _
+                      have hpf : pendingFail
+                          { f with remaining := rest, decided := some (i, true) } i r
+                          = some (.consumerLagged stream r.lastEnqueued) := by
+                        unfold pendingFail
+                        simp [hk]
+                      rw [hpf]
+                      exact hcorrNew
+                    · rw [hppNe hji] at hp
+                      obtain ⟨a, hlka, hca⟩ := hcorrPost j r0 hlkr hp
+                      refine ⟨a, hlka, ?_⟩
+                      rw [pendingOf_eq, pendingFail_of_decided_none hdec] at hca
+                      show corrSub (failOpt (pendingFail
+                        { f with remaining := rest, decided := some (i, true) } j r0) r0) a
+                      have hij2 : ¬ (i = j) := fun h => hji h.symm
+                      have hpf : pendingFail
+                          { f with remaining := rest, decided := some (i, true) } j r0 = none := by
+                        unfold pendingFail
+                        simp [hk, hij2]
+                      rw [hpf]
+                      exact hca
+                · intro j hsome
+                  refine ⟨(fun hq => by cases hq), fun g hg => ?_⟩
+                  have hg2 : some { f with remaining := rest, decided := some (i, true) }
+                    = some g := hg
+                  obtain rfl : { f with remaining := rest, decided := some (i, true) } = g :=
+                    Option.some.inj hg2
+                  obtain ⟨-, hf⟩ := hhist j hsome
+                  obtain ⟨hpass, hnpass⟩ := hf f hfan
+                  by_cases hji : j = i
+                  · subst hji
+                    refine ⟨fun _ => ?_, fun hnp => by rw [hppSelf] at hnp; exact Bool.noConfusion hnp⟩
+                    rw [abstractHistory_append j labels (owedOp f.kind :: owedRest) hrun
+                      (hnpass hnpi)]
+                    exact abstractHistoryFrom_frame j (owedOp f.kind :: owedRest)
+                      (owed_hist_frame howedOk hnpi) hrunPost
+                  · rw [hppNe hji]
+                    exact ⟨hpass, hnpass⟩
+              · -- admit: nothing passes its point
+                rw [decide_eq_false hovf]
+                have hpp := pointPassed_check_admit (f := f) (i := i) (rest := rest) hdec
+                refine ⟨labels, owedOp f.kind :: owedRest,
+                  ⟨sA, hrun, hnext, hkeys, (fun hq => by cases hq), ?_⟩, ?_, hserial,
+                  fun _ hnl hno => ⟨hnl, hno⟩⟩
+                · intro g hg
+                  have hg2 : some { f with remaining := rest, decided := some (i, false) }
+                    = some g := hg
+                  obtain rfl : { f with remaining := rest, decided := some (i, false) } = g :=
+                    Option.some.inj hg2
+                  refine ⟨?_, ?_, hrcore, ?_, owedRest, sPost, rfl, ?_, hrunPost, ?_⟩
+                  · intro j hs
+                    rcases hs with hm | ⟨b, hb⟩
+                    · exact hfresh j (Or.inl (by rw [hrem]; exact List.Mem.tail _ hm))
+                    · injection hb with hb2
+                      injection hb2 with hij _
+                      rw [← hij]
+                      exact hfresh i (Or.inl (by rw [hrem]; exact List.Mem.head _))
+                  · intro j a hlka hnp
+                    rw [hpp j] at hnp
+                    obtain ⟨h1, h2⟩ := hpre j a hlka hnp
+                    constructor
+                    · rcases h1 with hs | ht
+                      · rcases (hschedNew j).mp hs with hm | he
+                        · exact Or.inl (Or.inl hm)
+                        · exact Or.inl (Or.inr ⟨false, by rw [he]⟩)
+                      · exact Or.inr ht
+                    · intro hs
+                      refine h2 ((hschedNew j).mpr ?_)
+                      rcases hs with hm | ⟨b, hb⟩
+                      · exact Or.inl hm
+                      · injection hb with hb2
+                        injection hb2 with hij _
+                        exact Or.inr hij.symm
+                  · intro j r0 hlkr hnp
+                    rw [hpp j] at hnp
+                    exact hcorrPre j r0 hlkr hnp
+                  · intro l hl
+                    obtain ⟨j, hj, hpj⟩ := howedOk l hl
+                    exact ⟨j, hj, by rw [hpp j]; exact hpj⟩
+                  · intro j r0 hlkr hp
+                    rw [hpp j] at hp
+                    obtain ⟨a, hlka, hca⟩ := hcorrPost j r0 hlkr hp
+                    refine ⟨a, hlka, ?_⟩
+                    rw [pendingOf_eq, pendingFail_of_decided_none hdec] at hca
+                    show corrSub (failOpt (pendingFail
+                      { f with remaining := rest, decided := some (i, false) } j r0) r0) a
+                    have hpf : pendingFail
+                        { f with remaining := rest, decided := some (i, false) } j r0 = none := by
+                      unfold pendingFail
+                      simp [hk]
+                    rw [hpf]
+                    exact hca
+                · intro j hsome
+                  refine ⟨(fun hq => by cases hq), fun g hg => ?_⟩
+                  have hg2 : some { f with remaining := rest, decided := some (i, false) }
+                    = some g := hg
+                  obtain rfl : { f with remaining := rest, decided := some (i, false) } = g :=
+                    Option.some.inj hg2
+                  obtain ⟨-, hf⟩ := hhist j hsome
+                  rw [hpp j]
+                  exact hf f hfan
+
+
+theorem pointPassed_visit {f : FanOut} {i : SubId} {o : Outcome} {rem : List SubId}
+    (hppOld : ∀ j, pointPassed f j = f.visited.any (fun p => p.1 == j)) (j : SubId) :
+    pointPassed { f with
+        remaining := rem, decided := none, visited := f.visited ++ [(i, o)] } j
+      = (pointPassed f j || (i == j)) := by
+  rw [hppOld j]
+  unfold pointPassed
+  simp
+
+theorem pointPassed_resolve_keep {f : FanOut} {i : SubId} {o : Outcome}
+    (hdec : f.decided = some (i, true)) (j : SubId) :
+    pointPassed { f with decided := none, visited := f.visited ++ [(i, o)] } j
+      = pointPassed f j := by
+  have hb : ((some (i, true) : Option (SubId × Bool)) == some (j, true)) = (i == j) := by
+    show (i == j && (true == true)) = _
+    simp
+  unfold pointPassed
+  rw [hdec, hb]
+  simp
+
+/-- A `resolve` that makes its subscriber pass its point. -/
+theorem rel_resolve_visit {s s' : RtState} {f f' : FanOut} {i : SubId} {r r' : RtSubscriber}
+    {o : Outcome} {rem : List SubId} {labels owed : List Label} {l : RtLabel}
+    (hfan : s.fanOut = some f)
+    (hf' : f' = { f with
+        remaining := rem, decided := none, visited := f.visited ++ [(i, o)] })
+    (hppOld : ∀ j, pointPassed f j = f.visited.any (fun p => p.1 == j))
+    (hpendOld : ∀ j (r₀ : RtSubscriber), pendingOf f j r₀ = r₀)
+    (hlk : lookupRt s.subs i = some r)
+    (hupd : s' = { s with subs := updateRt s.subs i (fun _ => r'), fanOut := some f' })
+    (hchunks : r'.chunks = r.chunks)
+    (hnpi : pointPassed f i = false)
+    (hsched : Scheduled f i)
+    (hremSub : ∀ j, j ∈ rem → Scheduled f j ∧ j ≠ i)
+    (hschedNew : ∀ j, j ≠ i → Scheduled f j → j ∈ rem)
+    (hcrux : ∀ (sA sPost : SubState) (owedRest : List Label) (aPre : Subscriber),
+        lookupSub sA.subs i = some aPre → corrSub r aPre →
+        (aPre.status = .shutDown ∨ isTargetOf f.kind aPre = true) →
+        runLabels sA (owedOp f.kind :: owedRest) = some sPost → OwedOk f owedRest →
+        ∃ a, lookupSub sPost.subs i = some a ∧ corrSub r' a)
+    (hrel : Rel s labels owed) (hhist : RelHist s labels owed) :
+    RelStep s' labels owed [] l := by
+  obtain ⟨sA, hrun, hnext, hkeys, -, hflight⟩ := hrel
+  obtain ⟨hfresh, hpre, hrcore, hcorrPre, owedRest, sPost, howed, howedOk, hrunPost,
+    hcorrPost⟩ := hflight f hfan
+  subst howed
+  have hkind : f'.kind = f.kind := by rw [hf']
+  have hrem' : f'.remaining = rem := by rw [hf']
+  have hdec' : f'.decided = none := by rw [hf']
+  have hvis' : f'.visited = f.visited ++ [(i, o)] := by rw [hf']
+  have hpp : ∀ j, pointPassed f' j = (pointPassed f j || (i == j)) := by
+    rw [hf']; exact pointPassed_visit hppOld
+  have hppSelf : pointPassed f' i = true := by rw [hpp i]; simp
+  have hppNe : ∀ {j}, j ≠ i → pointPassed f' j = pointPassed f j := by
+    intro j hji
+    rw [hpp j]
+    have hij : ¬ (i = j) := fun h => hji h.symm
+    simp [hij]
+  have hlk' : lookupRt s'.subs i = some r' := by rw [hupd]; exact lookupRt_update_self hlk
+  have hlkne : ∀ j, j ≠ i → lookupRt s'.subs j = lookupRt s.subs j := by
+    intro j hj
+    rw [hupd]
+    exact lookupRt_updateRt_ne s.subs j i (fun _ => r') hj
+  have hkeys' : s'.subs.map Prod.fst = s.subs.map Prod.fst := by
+    rw [hupd]; exact updateRt_keys s.subs i (fun _ => r')
+  have hnext' : s'.nextId = s.nextId := by rw [hupd]
+  have hcore' : s'.core = s.core := by rw [hupd]
+  have hfan' : s'.fanOut = some f' := by rw [hupd]
+  have hhistEq : ∀ j, rtHistory s' j = rtHistory s j := by
+    intro j
+    by_cases hji : j = i
+    · rw [hji, rtHistory_eq hlk', rtHistory_eq hlk, hchunks]
+    · unfold rtHistory
+      rw [hlkne j hji]
+  have hisSome : ∀ j, (lookupRt s'.subs j).isSome = true → (lookupRt s.subs j).isSome = true := by
+    intro j hs
+    by_cases hji : j = i
+    · rw [hji, hlk]; rfl
+    · rw [← hlkne j hji]; exact hs
+  obtain ⟨aPre, hlkaPre, hcaPre⟩ := hcorrPre i r hlk hnpi
+  have htgt : aPre.status = .shutDown ∨ isTargetOf f.kind aPre = true :=
+    (hpre i aPre hlkaPre hnpi).2 hsched
+  obtain ⟨aPost, hlkPost, hcorrNew⟩ :=
+    hcrux sA sPost owedRest aPre hlkaPre hcaPre htgt hrunPost howedOk
+  refine ⟨labels, owedOp f.kind :: owedRest,
+    ⟨sA, hrun, by rw [hnext, hnext'], by rw [hkeys, hkeys'], ?_, ?_⟩, ?_, by rw [List.append_nil],
+    fun _ hnl hno => ⟨hnl, hno⟩⟩
+  · intro hq
+    rw [hfan'] at hq
+    cases hq
+  · intro g hg
+    rw [hfan'] at hg
+    obtain rfl : f' = g := Option.some.inj hg
+    refine ⟨?_, ?_, ?_, ?_, owedRest, sPost, by rw [hkind], ?_, hrunPost, ?_⟩
+    · intro j hs
+      have hjrem : j ∈ rem := by
+        rcases hs with hm | ⟨b, hb⟩
+        · rw [hrem'] at hm; exact hm
+        · rw [hdec'] at hb; cases hb
+      obtain ⟨hsj, hji⟩ := hremSub j hjrem
+      have hij : ¬ (i = j) := fun h => hji h.symm
+      rw [hvis']
+      simp only [List.any_append, List.any_cons, List.any_nil, Bool.or_false]
+      rw [hfresh j hsj]
+      simp [hij]
+    · intro j a hlka hnp
+      have hji : j ≠ i := by
+        intro he
+        rw [he, hppSelf] at hnp
+        exact Bool.noConfusion hnp
+      rw [hppNe hji] at hnp
+      obtain ⟨h1, h2⟩ := hpre j a hlka hnp
+      rw [hkind]
+      refine ⟨?_, ?_⟩
+      · rcases h1 with hs | ht
+        · exact Or.inl (Or.inl (by rw [hrem']; exact hschedNew j hji hs))
+        · exact Or.inr ht
+      · intro hs
+        refine h2 ?_
+        rcases hs with hm | ⟨b, hb⟩
+        · rw [hrem'] at hm
+          exact (hremSub j hm).1
+        · rw [hdec'] at hb; cases hb
+    · refine ⟨fun stream m el hkk => ?_, fun name hkk => ?_⟩
+      · rw [hcore']
+        exact hrcore.1 stream m el (by rw [← hkind]; exact hkk)
+      · rw [hcore']
+        exact hrcore.2 name (by rw [← hkind]; exact hkk)
+    · intro j r₀ hlkr hnp
+      have hji : j ≠ i := by
+        intro he
+        rw [he, hppSelf] at hnp
+        exact Bool.noConfusion hnp
+      rw [hppNe hji] at hnp
+      rw [hlkne j hji] at hlkr
+      exact hcorrPre j r₀ hlkr hnp
+    · intro lb hlb
+      obtain ⟨j, hj, hpj⟩ := howedOk lb hlb
+      refine ⟨j, hj, ?_⟩
+      by_cases hji : j = i
+      · rw [hji]; exact hppSelf
+      · rw [hppNe hji]; exact hpj
+    · intro j r₀ hlkr hp
+      by_cases hji : j = i
+      · rw [hji] at hlkr
+        rw [hlk'] at hlkr
+        cases hlkr
+        refine ⟨aPost, by rw [hji]; exact hlkPost, ?_⟩
+        rw [hji, pendingOf_of_decided_none hdec']
+        exact hcorrNew
+      · rw [hppNe hji] at hp
+        rw [hlkne j hji] at hlkr
+        obtain ⟨a, hlka, hca⟩ := hcorrPost j r₀ hlkr hp
+        refine ⟨a, hlka, ?_⟩
+        rw [pendingOf_of_decided_none hdec']
+        rw [hpendOld j r₀] at hca
+        exact hca
+  · intro j hsome
+    refine ⟨(fun hq => by rw [hfan'] at hq; cases hq), fun g hg => ?_⟩
+    rw [hfan'] at hg
+    obtain rfl : f' = g := Option.some.inj hg
+    obtain ⟨-, hf⟩ := hhist j (hisSome j hsome)
+    obtain ⟨hpass, hnpass⟩ := hf f hfan
+    rw [hhistEq j]
+    by_cases hji : j = i
+    · refine ⟨fun _ => ?_, fun hnp => by rw [hji, hppSelf] at hnp; exact Bool.noConfusion hnp⟩
+      have hnpj : pointPassed f j = false := by rw [hji]; exact hnpi
+      rw [abstractHistory_append j labels (owedOp f.kind :: owedRest) hrun (hnpass hnpj)]
+      exact abstractHistoryFrom_frame j (owedOp f.kind :: owedRest)
+        (owed_hist_frame howedOk hnpj) hrunPost
+    · rw [hppNe hji]
+      exact ⟨hpass, hnpass⟩
+
+
+theorem pointPassed_decided_false {f : FanOut} {i : SubId} (hdec : f.decided = some (i, false))
+    (j : SubId) : pointPassed f j = f.visited.any (fun p => p.1 == j) := by
+  have hb : ((some (i, false) : Option (SubId × Bool)) == some (j, true)) = false := by
+    show (i == j && (false == true)) = _
+    simp
+  unfold pointPassed
+  rw [hdec, hb]
+  simp
+
+theorem pendingOf_of_decided_false {f : FanOut} {i : SubId} (hdec : f.decided = some (i, false))
+    (j : SubId) (r₀ : RtSubscriber) : pendingOf f j r₀ = r₀ := by
+  rw [pendingOf_eq]
+  have hpf : pendingFail f j r₀ = none := by
+    unfold pendingFail
+    rw [hdec]
+    cases f.kind <;> rfl
+  rw [hpf]
+  rfl
+
+theorem pendingOf_of_delete {f : FanOut} {name : StreamName} (hk : f.kind = .delete name)
+    (j : SubId) (r₀ : RtSubscriber) : pendingOf f j r₀ = r₀ := by
+  rw [pendingOf_eq]
+  have hpf : pendingFail f j r₀ = none := by
+    unfold pendingFail
+    rw [hk]
+  rw [hpf]
+  rfl
+
+/-- A `resolve` that performs the failure a `check` had already decided: the abstract side has
+already seen it, so the correspondence is re-established by definition. -/
+theorem rel_resolve_keep {s s' : RtState} {f f' : FanOut} {i : SubId} {r r' : RtSubscriber}
+    {o : Outcome} {labels owed : List Label} {l : RtLabel}
+    (hinv : RtInv s)
+    (hfan : s.fanOut = some f)
+    (hf' : f' = { f with decided := none, visited := f.visited ++ [(i, o)] })
+    (hdec : f.decided = some (i, true))
+    (hlk : lookupRt s.subs i = some r)
+    (hupd : s' = { s with subs := updateRt s.subs i (fun _ => r'), fanOut := some f' })
+    (hchunks : r'.chunks = r.chunks)
+    (hr' : pendingOf f i r = r')
+    (hrel : Rel s labels owed) (hhist : RelHist s labels owed) :
+    RelStep s' labels owed [] l := by
+  obtain ⟨sA, hrun, hnext, hkeys, -, hflight⟩ := hrel
+  obtain ⟨hfresh, hpre, hrcore, hcorrPre, owedRest, sPost, howed, howedOk, hrunPost,
+    hcorrPost⟩ := hflight f hfan
+  subst howed
+  have hfinv := hinv.fanOut f hfan
+  have hiNotRem : i ∉ f.remaining := hfinv.decidedNotRemaining i true hdec
+  have hkind : f'.kind = f.kind := by rw [hf']
+  have hrem' : f'.remaining = f.remaining := by rw [hf']
+  have hdec' : f'.decided = none := by rw [hf']
+  have hvis' : f'.visited = f.visited ++ [(i, o)] := by rw [hf']
+  have hpp : ∀ j, pointPassed f' j = pointPassed f j := by
+    rw [hf']; exact pointPassed_resolve_keep hdec
+  have hppSelf : pointPassed f i = true := by
+    unfold pointPassed
+    rw [hdec]
+    have hb : ((some (i, true) : Option (SubId × Bool)) == some (i, true)) = true := by
+      show (i == i && (true == true)) = _
+      simp
+    rw [hb]
+    simp
+  have hlk' : lookupRt s'.subs i = some r' := by rw [hupd]; exact lookupRt_update_self hlk
+  have hlkne : ∀ j, j ≠ i → lookupRt s'.subs j = lookupRt s.subs j := by
+    intro j hj
+    rw [hupd]
+    exact lookupRt_updateRt_ne s.subs j i (fun _ => r') hj
+  have hkeys' : s'.subs.map Prod.fst = s.subs.map Prod.fst := by
+    rw [hupd]; exact updateRt_keys s.subs i (fun _ => r')
+  have hnext' : s'.nextId = s.nextId := by rw [hupd]
+  have hcore' : s'.core = s.core := by rw [hupd]
+  have hfan' : s'.fanOut = some f' := by rw [hupd]
+  have hhistEq : ∀ j, rtHistory s' j = rtHistory s j := by
+    intro j
+    by_cases hji : j = i
+    · rw [hji, rtHistory_eq hlk', rtHistory_eq hlk, hchunks]
+    · unfold rtHistory
+      rw [hlkne j hji]
+  have hisSome : ∀ j, (lookupRt s'.subs j).isSome = true → (lookupRt s.subs j).isSome = true := by
+    intro j hs
+    by_cases hji : j = i
+    · rw [hji, hlk]; rfl
+    · rw [← hlkne j hji]; exact hs
+  refine ⟨labels, owedOp f.kind :: owedRest,
+    ⟨sA, hrun, by rw [hnext, hnext'], by rw [hkeys, hkeys'], ?_, ?_⟩, ?_, by rw [List.append_nil],
+    fun _ hnl hno => ⟨hnl, hno⟩⟩
+  · intro hq
+    rw [hfan'] at hq
+    cases hq
+  · intro g hg
+    rw [hfan'] at hg
+    obtain rfl : f' = g := Option.some.inj hg
+    refine ⟨?_, ?_, ?_, ?_, owedRest, sPost, by rw [hkind], ?_, hrunPost, ?_⟩
+    · intro j hs
+      have hjrem : j ∈ f.remaining := by
+        rcases hs with hm | ⟨b, hb⟩
+        · rw [hrem'] at hm; exact hm
+        · rw [hdec'] at hb; cases hb
+      have hji : j ≠ i := fun he => hiNotRem (he ▸ hjrem)
+      have hij : ¬ (i = j) := fun h => hji h.symm
+      rw [hvis']
+      simp only [List.any_append, List.any_cons, List.any_nil, Bool.or_false]
+      rw [hfresh j (Or.inl hjrem)]
+      simp [hij]
+    · intro j a hlka hnp
+      rw [hpp j] at hnp
+      have hji : j ≠ i := by
+        intro he
+        rw [he, hppSelf] at hnp
+        exact Bool.noConfusion hnp
+      obtain ⟨h1, h2⟩ := hpre j a hlka hnp
+      rw [hkind]
+      refine ⟨?_, ?_⟩
+      · rcases h1 with hs | ht
+        · refine Or.inl (Or.inl ?_)
+          rw [hrem']
+          rcases hs with hm | ⟨b, hb⟩
+          · exact hm
+          · rw [hdec] at hb
+            injection hb with hb2
+            injection hb2 with hij2 _
+            exact absurd hij2.symm hji
+        · exact Or.inr ht
+      · intro hs
+        refine h2 ?_
+        rcases hs with hm | ⟨b, hb⟩
+        · rw [hrem'] at hm; exact Or.inl hm
+        · rw [hdec'] at hb; cases hb
+    · refine ⟨fun stream m el hkk => ?_, fun name hkk => ?_⟩
+      · rw [hcore']
+        exact hrcore.1 stream m el (by rw [← hkind]; exact hkk)
+      · rw [hcore']
+        exact hrcore.2 name (by rw [← hkind]; exact hkk)
+    · intro j r₀ hlkr hnp
+      rw [hpp j] at hnp
+      have hji : j ≠ i := by
+        intro he
+        rw [he, hppSelf] at hnp
+        exact Bool.noConfusion hnp
+      rw [hlkne j hji] at hlkr
+      exact hcorrPre j r₀ hlkr hnp
+    · intro lb hlb
+      obtain ⟨j, hj, hpj⟩ := howedOk lb hlb
+      exact ⟨j, hj, by rw [hpp j]; exact hpj⟩
+    · intro j r₀ hlkr hp
+      rw [hpp j] at hp
+      by_cases hji : j = i
+      · rw [hji] at hlkr
+        rw [hlk'] at hlkr
+        cases hlkr
+        obtain ⟨a, hlka, hca⟩ := hcorrPost i r hlk (by rw [← hji]; exact hp)
+        refine ⟨a, by rw [hji]; exact hlka, ?_⟩
+        rw [hji, pendingOf_of_decided_none hdec', ← hr']
+        exact hca
+      · rw [hlkne j hji] at hlkr
+        obtain ⟨a, hlka, hca⟩ := hcorrPost j r₀ hlkr hp
+        refine ⟨a, hlka, ?_⟩
+        rw [pendingOf_of_decided_none hdec']
+        have hpo : pendingOf f j r₀ = r₀ := by
+          rw [pendingOf_eq]
+          have hpf : pendingFail f j r₀ = none := by
+            unfold pendingFail
+            rw [hdec]
+            cases f.kind with
+            | delete _ => rfl
+            | publish _ _ _ =>
+              have hij : ¬ (i = j) := fun h => hji h.symm
+              simp [hij]
+          rw [hpf]
+          rfl
+        rw [hpo] at hca
+        exact hca
+  · intro j hsome
+    refine ⟨(fun hq => by rw [hfan'] at hq; cases hq), fun g hg => ?_⟩
+    rw [hfan'] at hg
+    obtain rfl : f' = g := Option.some.inj hg
+    obtain ⟨-, hf⟩ := hhist j (hisSome j hsome)
+    rw [hhistEq j, hpp j]
+    exact hf f hfan
+
+
+theorem rel_step_resolve {s s' : RtState} {id : SubId} (hinv : RtInv s)
+    (hstep : rtResolve s id = some s') {labels owed : List Label}
+    (hrel : Rel s labels owed) (hhist : RelHist s labels owed) :
+    RelStep s' labels owed [] (.resolve id) := by
+  unfold rtResolve at hstep
+  cases hfan : s.fanOut with
+  | none => simp only [hfan] at hstep; simp at hstep
+  | some f =>
+    simp only [hfan] at hstep
+    have hfinv := hinv.fanOut f hfan
+    cases hk : f.kind with
+    | publish stream m el =>
+      simp only [hk] at hstep
+      cases hdec : f.decided with
+      | none => simp only [hdec] at hstep; simp at hstep
+      | some p =>
+        obtain ⟨i, ovf⟩ := p
+        simp only [hdec] at hstep
+        split at hstep
+        · simp at hstep
+        · rename_i hii
+          have hii2 : i = id := Classical.byContradiction hii
+          subst hii2
+          cases hlk : lookupRt s.subs i with
+          | none => simp only [hlk] at hstep; simp at hstep
+          | some r =>
+            simp only [hlk] at hstep
+            have hsub := rtSubInv_of_lookup hinv hlk
+            have hro : r.registered = true → r.queue.status = .opened :=
+              fun hb => (hsub.registeredOpen hb).1
+            cases ovf with
+            | true =>
+              simp only [if_true] at hstep
+              cases hstep
+              rw [← hk]
+              have hr2 : pendingOf f i r = { r with
+                  registered := false,
+                  queue := r.queue.fail (.consumerLagged stream r.lastEnqueued) } := by
+                rw [pendingOf_eq]
+                have hpf : pendingFail f i r
+                    = some (.consumerLagged stream r.lastEnqueued) := by
+                  unfold pendingFail
+                  rw [hk, hdec]
+                  simp
+                rw [hpf]
+                rfl
+              exact rel_resolve_keep (o := .overflowed) hinv hfan rfl hdec hlk rfl rfl hr2
+                hrel hhist
+            | false =>
+              have hfreshF : FanFresh f := by
+                obtain ⟨sA0, -, -, -, -, hfl0⟩ := hrel
+                exact (hfl0 f hfan).1
+              have hnpi : pointPassed f i = false := by
+                rw [pointPassed_decided_false hdec]
+                exact hfreshF i (Or.inr ⟨false, hdec⟩)
+              have hroom : r.queue.buffer.length < r.policy.capacity ∨
+                  r.queue.status ≠ .opened := hfinv.decidedRoom i hdec r hlk
+              cases hoff : r.queue.offer r.policy.capacity m with
+              | mk q' res =>
+                simp only [hoff] at hstep
+                have hmain : ∀ o : Outcome, RelStep { s with
+                    subs := updateRt s.subs i
+                      (fun _ => { r with queue := q', lastEnqueued := m.sequence }),
+                    fanOut := some { f with
+                      decided := none, visited := f.visited ++ [(i, o)] } }
+                    labels owed [] (.resolve i) := by
+                  intro o
+                  refine rel_resolve_visit (f := f) (i := i) (r := r) (o := o)
+                    (rem := f.remaining) hfan rfl (pointPassed_decided_false hdec)
+                    (pendingOf_of_decided_false hdec) hlk rfl rfl hnpi (Or.inr ⟨false, hdec⟩)
+                    ?_ ?_ ?_ hrel hhist
+                  · intro j hj
+                    exact ⟨Or.inl hj, fun he => (hfinv.decidedNotRemaining i false hdec)
+                      (he ▸ hj)⟩
+                  · intro j hji hs
+                    rcases hs with hm | ⟨b, hb⟩
+                    · exact hm
+                    · rw [hdec] at hb
+                      injection hb with hb2
+                      injection hb2 with hij2 _
+                      exact absurd hij2.symm hji
+                  · intro sA sPost owedRest aPre hlkaPre hcaPre htgt hrunPost howedOk
+                    obtain ⟨hpub, -⟩ := owed_lookup (f := f) hrunPost howedOk hnpi hlkaPre
+                    exact ⟨deliverOne stream m aPre, hpub stream m el hk,
+                      admit_corr hro hroom (by rw [← hk]; exact htgt) hoff hcaPre⟩
+                cases res with
+                | wouldSuspend => simp at hstep
+                | accepted =>
+                  simp only [] at hstep
+                  cases hstep
+                  rw [← hk]
+                  exact hmain .admitted
+                | refused =>
+                  simp only [] at hstep
+                  cases hstep
+                  rw [← hk]
+                  exact hmain .skipped
+    | delete name =>
+      simp only [hk] at hstep
+      cases hdec : f.decided with
+      | some p => simp only [hdec] at hstep; simp at hstep
+      | none =>
+        cases hrem : f.remaining with
+        | nil => simp only [hdec, hrem] at hstep; simp at hstep
+        | cons i rest =>
+          simp only [hdec, hrem] at hstep
+          split at hstep
+          · simp at hstep
+          · rename_i hii
+            have hii2 : i = id := Classical.byContradiction hii
+            subst hii2
+            cases hlk : lookupRt s.subs i with
+            | none => simp only [hlk] at hstep; simp at hstep
+            | some r =>
+              simp only [hlk] at hstep
+              cases hstep
+              rw [← hk]
+              have hsub := rtSubInv_of_lookup hinv hlk
+              have hro : r.registered = true → r.queue.status = .opened :=
+                fun hb => (hsub.registeredOpen hb).1
+              have hfreshF : FanFresh f := by
+                obtain ⟨sA0, -, -, -, -, hfl0⟩ := hrel
+                exact (hfl0 f hfan).1
+              have hnpi : pointPassed f i = false := by
+                rw [pointPassed_of_decided_none hdec]
+                exact hfreshF i (Or.inl (by rw [hrem]; exact List.Mem.head _))
+              refine rel_resolve_visit (f := f) (i := i) (r := r) (o := .ended)
+                (rem := rest) hfan rfl (pointPassed_of_decided_none hdec)
+                (pendingOf_of_delete hk) hlk rfl rfl hnpi
+                (Or.inl (by rw [hrem]; exact List.Mem.head _)) ?_ ?_ ?_ hrel hhist
+              · intro j hj
+                refine ⟨Or.inl (by rw [hrem]; exact List.Mem.tail _ hj), ?_⟩
+                intro he
+                have hnd := hfinv.remainingNodup
+                rw [hrem] at hnd
+                exact (List.pairwise_cons.mp hnd).1 j hj he.symm
+              · intro j hji hs
+                rcases hs with hm | ⟨b, hb⟩
+                · rw [hrem] at hm
+                  rcases List.mem_cons.mp hm with he | hm2
+                  · exact absurd he hji
+                  · exact hm2
+                · rw [hdec] at hb; cases hb
+              · intro sA sPost owedRest aPre hlkaPre hcaPre htgt hrunPost howedOk
+                obtain ⟨-, hdel⟩ := owed_lookup (f := f) hrunPost howedOk hnpi hlkaPre
+                exact ⟨endOne name aPre, hdel name hk,
+                  end_corr hro (by rw [← hk]; exact htgt) hcaPre⟩
+
+
 end EffectNatsSubstrate
