@@ -51,23 +51,33 @@ def corrOn (s : RtState) (sA : SubState) (sel : SubId → Bool) : Prop :=
   ∀ id r, lookupRt s.subs id = some r → sel id = true →
     ∃ a, lookupSub sA.subs id = some a ∧ corrSub r a
 
-/-- The owed suffix: the consumer labels (pulls, unsubscribes) of subscribers past their point,
-in runtime order — applied after the owed operation. -/
+/-- The owed suffix: the pulls of subscribers past their point, in runtime order — applied
+after the owed operation. `closeA` is matched immediately on every side of a fan-out (measured:
+both placements are witnesses), so `unsubscribe` is never owed. -/
 def OwedOk (f : FanOut) (owed : List Label) : Prop :=
   ∀ l ∈ owed, match l with
     | .pull i => pointPassed f i = true
-    | .unsubscribe i => pointPassed f i = true
     | _ => False
 
+/-- The guard of `deliverOne` (`Next.lean:47`) / `endOne` (`:65`): would the owed operation act
+on this abstract subscriber? -/
+def isTargetOf : FanKind → Subscriber → Bool
+  | .publish stream m _, a => a.stream == stream && a.registered && matchesAny a.filters m.subject
+  | .delete name, a => a.stream == name && a.registered
+
 /-- The relation. `labels` is the matched abstract prefix; `owed` the suffix still to be applied.
-Quiescent: `owed = []`, the abstract state `sA` erases to `s` subscriber by subscriber and the
-cores agree. In flight: `sA` is the pre-operation abstract state — its core is what the runtime
-stored from, subscribers before their point erase to it, subscribers past their point erase to
-the state after the owed operation and their owed labels, and the fan-out's lists cover exactly
-the abstract operation's targets. -/
+Both sides have the same subscriber ids (they only grow at `register`, the same label on both
+sides). Quiescent: `owed = []`, the abstract state `sA` erases to `s` subscriber by subscriber
+and the cores agree. In flight: `sA` is the pre-operation abstract state — its core is what the
+runtime stored from; subscribers before their point erase to it and are either still scheduled
+(`remaining`/`decided`) or not targets of the owed operation at all (one-sided: a `closeA` can
+turn a scheduled target into a non-target, which the runtime still visits and the abstract
+operation skips — unobservably, since `closeStarted` freezes it); subscribers past their point
+erase to the state after the owed operation and their owed pulls. -/
 def Rel (s : RtState) (labels owed : List Label) : Prop :=
   ∃ sA, runLabels initialSub labels = some sA ∧
     sA.nextId = s.nextId ∧
+    sA.subs.map Prod.fst = s.subs.map Prod.fst ∧
     match s.fanOut with
     | none =>
       owed = [] ∧ sA.core = s.core ∧ corrOn s sA (fun _ => true)
@@ -76,6 +86,8 @@ def Rel (s : RtState) (labels owed : List Label) : Prop :=
         ∃ sPost, runLabels sA owed = some sPost ∧
           corrOn s sA (fun id => !pointPassed f id) ∧
           corrOn s sPost (fun id => pointPassed f id)) ∧
+      (∀ id a, lookupSub sA.subs id = some a → pointPassed f id = false →
+        id ∈ f.remaining ∨ (∃ b, f.decided = some (id, b)) ∨ isTargetOf f.kind a = false) ∧
       (match f.kind with
         | .publish stream m el =>
           step sA.core (.publish stream m.subject m.payload m.headers el m.timestampMillis)
