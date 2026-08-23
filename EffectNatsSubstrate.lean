@@ -17,6 +17,7 @@ import EffectNatsSubstrate.EffectQueue
 import EffectNatsSubstrate.Runtime
 import EffectNatsSubstrate.RtTraces
 import EffectNatsSubstrate.RtInvariants
+import EffectNatsSubstrate.RtList
 import EffectNatsSubstrate.EffectQueueLaws
 import EffectNatsSubstrate.SimRelation
 import EffectNatsSubstrate.Sim

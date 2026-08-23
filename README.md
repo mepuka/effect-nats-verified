@@ -119,6 +119,7 @@ EffectNatsSubstrate/
   EffectQueue.lean   the Effect queue component (stage B1)
   Runtime.lean       the runtime LTS at A4's step granularity
   RtInvariants.lean  the runtime invariant
+  RtList.lean        the shared lookupRt/updateRt toolkit (extracted from SimProof at the P2/P3 consolidation)
   RtTraces.lean      the stage-B1 scenarios, checked by decide
   Sim.lean           the stage-B1 statements: A4Inclusion, A4Complete
   EffectQueueLaws.lean the queue laws Q1–Q3 as theorems (SB1)
