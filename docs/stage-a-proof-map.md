@@ -9,6 +9,9 @@
   without touching a frozen statement. Written for the lane that does the cleanup and for
   reviewers of `cdb4709`.
 - **Citation root:** this package directory; `:line` anchors were opened at `cdb4709`.
+- **Revision:** 2026-08-23 — §5b (cleanup worklist 2) added and §7 repointed at the lanes plan;
+  §5b anchors were opened at `c11f652` (no package code changed between the two pins other
+  than the merged cleanup lane, which §5 records).
 
 ## 1. The model in one page
 
@@ -279,6 +282,219 @@ any frozen theorem; "simplify" `lagged_iff` by dropping `hreach` (the bare state
 the amendment is logged in the snapshot and awaits the owner's approval); reformat files
 wholesale (diffs must stay reviewable).
 
+## 5b. Cleanup worklist 2 (2026-08-23; for the cleanup lane)
+
+**Status:** open. Written for the lane that did items 1–7: same constraints as §5 (no frozen
+statement changes — names, elaborated types, `SubInv`'s clauses, and the module a frozen theorem
+is stated in; `Next.lean` definitions frozen; helper lemmas may move, merge, or be renamed; the
+gate of §6 after every change; `README.md` "Layout", §1 of this document, and the slice
+document §12 DAG updated in the same commit as any move; one commit per item, nothing else in
+it). Work in a fresh worktree on a branch named for the lane; the merge gate is §6 plus the
+signature probe (`pp.all` on every frozen declaration before and after; identical output).
+Every `file:line` below was opened at Foldable `c11f652`; re-open before editing — lines move.
+
+Ordered by value over risk: deletions and one-line substitutions first, eliminators next,
+optional rewrites last. Items 17–18 are gate hardening, not proof work.
+
+1. **Four dead lemmas.** Declared and referenced nowhere else in `EffectNatsSubstrate/` or
+   `Main.lean`: `mem_entrySequences` (`SubCore.lean:209-222`), `lookupSub_nextId`
+   (`SubReachable.lean:431-434`; also named in §1's `SubReachable` row — delete the mention),
+   `liveKeep_admit` (`SubHistory.lean:300-302`; named in §1's `SubHistory` row and in §5 item 7 —
+   keep it if you prefer a `rfl` witness for why `liveOf_admit` is trivial, else delete and fix
+   the mention), `keepLatest_zero` (`Views.lean:120-122`; `keepLatest` is a frozen carrier, the
+   lemma is not). No proof changes.
+2. **`pairwise_lt_append_singleton` (`SubCore.lean:245-252`) is `pairwise_append_singleton`
+   (`Views.lean:58-65`) at `Nat`/`(· < ·)`.** Delete it; add `import EffectNatsSubstrate.Views`
+   to `SubCore.lean` (cycle-free: `SubCore` already imports `Invariants`, which sits below
+   `Views`); replace the two call sites `SubProofs.lean:376` (`deliverOne_inv`) and
+   `SubReachable.lean:391` (`apply_shape`) — same argument order. The import also serves items 3
+   and 12.
+3. **The last two `simp only [applyPublish]` outside `Views.lean`.** `Proofs.lean:501-507`
+   (`reachable_positive`) and `SubHistory.lean:326-334` (`histInv_publish`, `coreCommitted` arm)
+   unfold the pipeline to prove "a stored message after a commit was stored before or is the new
+   one". Add, in `Proofs.lean` after `publishBase_sublist` (`:68-73`):
+   `theorem mem_applyPublish {st subject payload headers rollup now m}
+   (h : m ∈ (applyPublish st subject payload headers rollup now).1.messages) :
+   m ∈ st.messages ∨ m = newMessage st subject payload headers now` and use it at both sites.
+   Bodies only; `reachable_positive` is frozen (r2) in statement.
+4. **§5 item 8 — `pullStep_inv` (`SubProofs.lean:167-237`).** The `done` (`:172-192`),
+   `opened` (`:193-213`), and `closing` (`:214-236`) arms each rebuild the eleven-field `SubInv`
+   with `constructor` + eleven bullets (`:181-192`, `:202-213`, `:225-236`); bullets 1, 9, 10 are
+   byte-identical across all three, bullets 2, 3, 4, 5, 8, 11 between `opened` and `closing`;
+   the `hvis` equation is restated three times (`:177-180`, `:198-201`, `:221-224`). Add beside
+   `SubInv.of_stream_lookup` (`SubCore.lean:262-272`):
+   `theorem SubInv.pulled {s sub} (hinv : SubInv s sub) {obs' st' reg'}
+   (hvis : entrySequences (visible { sub with observed := obs', pending := [], status := st',
+   registered := reg' }) = entrySequences (visible sub)) (hopen : reg' = true → st' = .opened)
+   (hclosing : ∀ e, st' ≠ .closing e) (hshut : st' = .shutDown → reg' = false)
+   (hstream : reg' = true → ∃ st₀, lookupStream s.core sub.stream = some st₀ ∧
+   sub.lastEnqueued < st₀.nextSequence) : SubInv s { sub with … }` — every clause discharges
+   uniformly (`capacity := Nat.zero_le _`, `pendingMatch := fun _ hm => nomatch hm`,
+   `pendingLast := fun h => absurd rfl h`, `visibleStrict`/`visibleBound` through `hvis`). The
+   three arms then supply `hvis` and the side conditions (≈ 8 lines each), and
+   `unsubscribe_inv` (`SubProofs.lean:238-260`) is the fourth instance with `reg' := false`.
+   Callers `applyPull_inv` (`SubReachable.lean:205`) and `applyUnsubscribe_inv` (`:222`) are
+   unchanged. Take item 10 first so `hvis` is `congrArg entrySequences (visible_drain …)`.
+5. **`deliverOne_overflow_closing`.** The derivation "capacity positive ⇒ full buffer non-empty
+   ⇒ status is `closing`, not `done`" is written at `SubProofs.lean:334-343` (`deliverOne_inv`,
+   with a 4-line `cases` for `hempty`) and `SubStatements.lean:332-337` (`lagInv_deliverOne`,
+   one line via `List.isEmpty_eq_false_iff.mpr`), then consumed by two 6-line `have h' … rw
+   [hempty, if_neg …] at h'; cases h'` blocks at `SubStatements.lean:340-351`. Add after
+   `deliverOne_overflow` (`SubProofs.lean:288-300`):
+   `theorem deliverOne_overflow_closing {s stream m sub n} (hinv : SubInv s sub)
+   (hcond : (sub.stream == stream && sub.registered && matchesAny sub.filters m.subject) = true)
+   (hpol : sub.policy = .terminateOnLag n) (hfull : n ≤ sub.pending.length) :
+   deliverOne stream m sub = { sub with registered := false, status := .closing
+   (.consumerLagged stream sub.lastEnqueued) } ∧ sub.pending ≠ []`. `deliverOne_overflow` stays
+   (used by `publish_visible`, `lagged_iff_of_open`, `histInv_publish`).
+6. **`endOne_end`, the positive face `endOne_skip` (`SubProofs.lean:308-312`) lacks.** The
+   `if sub.pending.isEmpty then .done … else .closing …` term is restated by hand at
+   `SubProofs.lean:409-410`, `:415-416`, `:421-422` (`endOne_inv`), `SubStatements.lean:373-374`,
+   `:377-378` (`lagInv_endOne`), and `unfold endOne; rw [if_pos hc]` at
+   `SubHistory.lean:276-278`, `:287-289`, `:290-292` (`histInv_delete`) and
+   `SubStatements.lean:259-266` (`delete_ends`, frozen statement, body only). Add next to
+   `endOne_skip`: `theorem endOne_end {name sub} (hcond : (sub.stream == name && sub.registered)
+   = true) : endOne name sub = { sub with registered := false, status := if sub.pending.isEmpty
+   then .done (.streamNotFound name) else .closing (.streamNotFound name) }`.
+7. **`pullStep_ok_eq` — five sites re-split `pullStep`'s four arms.** `SubProofs.lean:169-236`,
+   `SubStatements.lean:168-174` (`pull_visible`, frozen statement, body only),
+   `SubStatements.lean:386-449` (`lagInv_pullStep`), and `SubHistory.lean:542-564` **and**
+   `:566-589` (the same 23-line ladder twice inside `histInv_pull`). Add before `pullStep_inv`:
+   `theorem pullStep_ok_eq {sub sub'} (h : pullStep sub = some sub') :
+   (∃ e, sub.status = .done e ∧ sub' = { sub with observed := sub.observed ++ [.failed e],
+   status := .shutDown }) ∨ (sub.status = .opened ∧ sub.pending ≠ [] ∧ sub' = { sub with
+   observed := sub.observed ++ sub.pending.map Observed.entry, pending := [] }) ∨ (∃ e,
+   sub.status = .closing e ∧ sub.pending ≠ [] ∧ sub' = { sub with observed := sub.observed ++
+   sub.pending.map Observed.entry, pending := [], status := .done e })`. `pullStep`
+   (`Next.lean:75-87`) is frozen and read only.
+8. **`apply*_ok_eq` — the widest repeat; four commits, one per eliminator.** `unfold applyX at
+   h; split at h; …` ladders: `applyPull` at `SubProofs.lean:62-67`, `SubReachable.lean:192-205`,
+   `:409-415`, `SubStatements.lean:158-167`, `:510-523` (line-for-line the `SubReachable:192-205`
+   copy), `SubHistory.lean:524-531`; `applyUnsubscribe` at `SubProofs.lean:71-76`,
+   `SubReachable.lean:209-222`, `:418-424`, `SubStatements.lean:526-539`,
+   `SubHistory.lean:596-606`; `applyRegister` at `SubProofs.lean:48-58`,
+   `SubReachable.lean:66-78`, `:169-188`, `:378-406`, `SubStatements.lean:79-96`, `:491-507`,
+   `SubHistory.lean:447-517` (79 lines, arm-closer `all_goals first | cases h' | …` at `:461`);
+   the `applyOp` error arm at `SubProofs.lean:37-42`, `SubReachable.lean:158-161`, `:370-373`,
+   `SubStatements.lean:232-238`, `:484-487`, `SubHistory.lean:424-438`. Add in `SubProofs.lean`
+   (the pull/register ones inside `section Frame`, generic in `deliver`/`pull`, so `pullStepW1`
+   and `deliverOneW2` are served too):
+   `applyPull_ok_eq {s s' id} (h : applyPull pull s id = some s') : ∃ sub sub', lookupSub s.subs
+   id = some sub ∧ pull sub = some sub' ∧ s' = { s with subs := updateSub s.subs id (fun _ =>
+   sub') }`;
+   `applyUnsubscribe_ok_eq {s s' id} (h : applyUnsubscribe s id = some s') : ∃ sub, lookupSub
+   s.subs id = some sub ∧ sub.status ≠ .shutDown ∧ s' = { s with subs := updateSub s.subs id
+   (fun sub => { sub with registered := false, pending := [], status := .shutDown }) }`;
+   `applyRegister_ok_eq {s s' stream opts l₀ id e} (h : applyRegister s stream opts l₀ id e =
+   some s') : (lookupStream s.core stream = none ∧ e = .error (.streamNotFound stream) ∧ s' = s)
+   ∨ (∃ st, lookupStream s.core stream = some st ∧ e = .ok .unit ∧ replayBound st.messages
+   opts l₀ st.nextSequence = true ∧ s' = { s with subs := s.subs ++ [(id, newSubscriber stream
+   opts l₀ st.messages)], nextId := id + 1 })`;
+   `applyOp_error_eq {s s' o err} (h : applyOp deliver s o (.error err) = some s') : s' = s ∧
+   step s.core o = .error err`.
+   Prerequisite move in the first of the four commits: `applyOp_ok_eq`
+   (`SubStatements.lean:31-49`, not frozen, already consumed from `SubHistory.lean:417`) joins
+   them in `SubProofs.lean`'s `Frame` section; §1 rows and the §12 DAG follow. Frozen statements
+   whose bodies change: `register_observed`, `pull_visible`, `create_restarts`, `delete_ends`,
+   `memory_lastEnqueued_admissible` — they stay in `SubStatements`. Expected net −150 to −200
+   lines.
+9. **An 8-line block twice inside `lagInv_pullStep`** (`SubStatements.lean:419-425` and
+   `:443-449`, byte-identical from `exfalso` on). Add to `SubCore.lean`'s `visible` section:
+   `theorem getLast?_visible_ne_failed {sub} (hne : sub.pending ≠ []) {e} : (sub.observed ++
+   sub.pending.map Observed.entry).getLast? ≠ some (Observed.failed e)`; 16 lines → 2.
+10. **`visible_drain`/`visible_drain_done` (`SubCore.lean:234-243`) re-proved by `simp
+    [visible]`** at `SubProofs.lean:198-201` and `:221-224`; `unfold visible` at
+    `SubProofs.lean:241` and `:257` (`unsubscribe_inv`); `entrySequences_append,
+    entrySequences_failed, List.append_nil` recomputed at `SubStatements.lean:401`. Use
+    `congrArg entrySequences (visible_drain sub)` / `(visible_drain_done sub e)`; add the
+    missing sibling for the `done` arm (`SubProofs.lean:177-180`):
+    `theorem entrySequences_visible_fail (sub) (e) : entrySequences (visible { sub with observed
+    := sub.observed ++ [Observed.failed e], status := .shutDown }) = entrySequences (visible
+    sub)` — the existing proof passes `hpend` to `simp`; check on compile whether the equation
+    needs it (it should not). Same commit: move `entrySequences_visible_newSubscriber`
+    (`SubProofs.lean:126-134`; consumers `:153`, `:156`) to `SubCore.lean`'s equations section —
+    §5 item 7's rule applied to the sites item 7 did not reach.
+11. **`apply_lag` (`SubStatements.lean:473-540`, 68 lines) is `apply_inv`
+    (`SubReachable.lean:224-231`, 9 lines) inlined.** Arms `:476-488` (op), `:489-507`
+    (register), `:508-523` (pull), `:524-539` (unsubscribe) mirror `applyOp_inv`,
+    `applyRegister_inv`, `applyPull_inv`, `applyUnsubscribe_inv`. Introduce `lagState_applyOp`,
+    `lagState_applyRegister`, `lagState_applyPull`, `lagState_applyUnsubscribe` next to
+    `lagState_afterOp` (`:459-471`) so `apply_lag` becomes the same `cases l with` dispatch;
+    with item 8 landed each is 4–6 lines. `lagged_carries_last_observed` (`:544-547`, frozen)
+    unchanged. Add the four names to §1's `SubStatements` row.
+12. **`create_restarts` (`SubStatements.lean:268-287`, frozen statement) re-unfolds
+    `createStep`** (`:275`) and re-derives `validate_ok_sound` (`:279`) although
+    `createStep_ok_shape` (`SubCore.lean:132-146`) returns exactly the needed disjunction
+    (`histInv_create`, `SubHistory.lean:210`, already uses it). Body only:
+    `rcases createStep_ok_shape hc with rfl | ⟨config, hval, hlook, rfl⟩`, then
+    `(validate_ok_sound hval).1` and `lookup_insert`. ≈ 20 → 10 lines.
+13. **`replayBound` unfolded two ways** — `SubProofs.lean:142` (`simp only [replayBound, …]`)
+    and `SubStatements.lean:143-149` (`unfold replayBound; rw …`). Optional face in
+    `SubCore.lean`: `theorem replayBound_eq_true_iff {messages opts l₀ nextSeq} : replayBound
+    messages opts l₀ nextSeq = true ↔ (∀ m ∈ selectReplay messages opts, m.sequence ≤ l₀) ∧ l₀ <
+    nextSeq`. Two sites, ≈ 8 lines: bundle with item 12 or drop.
+14. **`histInv_get` (`SubHistory.lean:220-230`) and `histInv_last` (`:231-243`) are one proof**
+    (only the step lemma and the `show`n label differ; both end in the identical
+    `exact histInv_of_same hinv hinv.coreCommitted rfl rfl`). One `histInv_readonly`
+    parameterised by `o : Op` with hypotheses `core' = sH.base.core` and `afterOp deliverOne
+    sH.base core' o r = { sH.base with core := core' }`, the two kept as two-line corollaries.
+    The hypothesis shape needs a compile check (`committedAfter`/`regsAfter` must still reduce for
+    a variable `r`) — a needs-verification item, not a mechanical edit.
+15. **`op_visible_frame` (`SubStatements.lean`, frozen statement) closes six arms with the same
+    one-liner** (`:223`, `:224`, `:225`, `:227`, `:228`, `:230`: `simp only [afterOp] at ha; rw
+    [hb] at ha; cases ha; rfl`). After the two special arms, `all_goals (…)`. Cosmetic; last.
+16. **Sequential: `pairwise_of_sublist` (`Proofs.lean:29-41`, private) is
+    `List.Pairwise.sublist` with swapped arguments**, which `SubProofs.lean:124` and
+    `SubStatements.lean:130` already call directly. Delete it; rewrite `Proofs.lean:214` and
+    `:234` (`applyPublish_inv`) as `List.Pairwise.sublist hbase h.1` / `List.Pairwise.sublist
+    hsub happPair`. Statements unchanged.
+17. **Gate as a committed script, and CI parity.** The package's
+    `.github/workflows/lean_action_ci.yml` runs the exporter without `--foldable-commit`
+    (`:18-19`; the documented gate runs it with, §6), has no forbidden-token sweep, no
+    `#print axioms` probe, and uses `leanprover/lean-action@v1` unpinned (`:14`). The workflow is
+    live in the standalone publication (`effect-nats-verified`, a subtree split whose root is this
+    directory), not in the Foldable monorepo. Add `scripts/gate.sh` (build; the grep of §6; `lake
+    env lean scripts/Axioms.lean` where that file `#print axioms` every name in §6's list and the
+    r1–r2 frozen theorems; the exporter twice with `--foldable-commit $(git rev-parse HEAD)` and
+    `cmp`; exit non-zero on any failure) and call it from the workflow; pin the action by
+    commit SHA. `scripts/` is outside the library, so nothing changes under the kernel.
+18. **Documentation that no longer matches the tree** (doc-only commit; verify each claim against
+    the code before rewording): `README.md:110` says `SubReachable.lean` holds "the one induction
+    over reachable states" — there are three over `ReachableSub` (`SubProofs.lean:91`
+    `reachableSub_core`; `SubReachable.lean:234` `stateInv_reachable`; `:250` `reachableSub_all`)
+    and two over `ReachableSubH` (`SubHistory.lean:107`, `:639`); the first two are the bootstrap
+    of the third (`reachableSub_all`, `:246-252`, is built from `stateInv_reachable`, built from
+    `reachableSub_core`), so restate the rule here (§2, `:62-63`) and in `README.md` as "no
+    `induction` over `ReachableSub` other than the two bootstrap inductions and `reachableSub_all`;
+    every later fact goes through `reachableSub_all`". `README.md:108` calls `SubCore.lean` "facts
+    about the core" although it now owns the `visible`/`entrySequences` equations
+    (`SubCore.lean:190-256`). §1's `SubProofs` row omits `entrySequences_visible_newSubscriber`
+    and `registered_false_of_status` (`SubProofs.lean:161-166`); the `SubStatements` row omits
+    `eq_of_sequence_eq_of_pairwise` (`SubStatements.lean:100-113`), `NegKind`, `negativeHolds`,
+    `negOpts`/`negCreate`/`negPublish`/`negRegister`. The slice document §12 DAG (`research/…
+    -subscriber-stage-a.md:443-476`) is stale in the `SubCore`, `SubProofs`, `SubReachable`,
+    `SubHistory`, and `SubStatements` rows (names added by §5 items 2, 6, 7 and the proofs);
+    correct it in the same commit under the Correct workflow (`research/AGENTS.md`).
+
+**Not in this worklist (owner's call, recorded for the next snapshot revision):**
+`docs/signature-snapshot.md:3-5` still reads "revision 2.1 … 31 frozen declarations … 76
+non-private theorems" although r3.1 is ratified below it and the package holds 214 non-private
+theorems; and its approved edit regions (`:379-381`) name `SubProofs`/`SubReachable`/
+`SubStatements` but not `SubCore`/`SubHistory`, where §5 moved helper lemmas. Both are freeze
+documents: they change with the next snapshot revision, not in a cleanup commit.
+
+**Not to do (looks like cleanup, touches something frozen):** delete the eight `sa_*_trace`
+singletons or the sequential `*_trace` ones even though `all_sub_traces`/`all_traces` subsume
+them and double the kernel `decide` cost — frozen names, in the axiom-probe list; fold `LagInv`
+into `SubInv`; drop `hreach` from `lagged_iff`; rewrite `afterOp`'s `let` (`Next.lean:108-110`)
+to `publishedMessage`; move SA1 out of `SubProofs`, SA2/SA3 out of `SubReachable`, SA4–SA7 or
+`all_sub_negatives` out of `SubStatements`, SA5h out of `SubHistory` (item 8 moves
+`applyOp_ok_eq` only — it is not frozen); "simplify" `reachableSub_core` or `stateInv_reachable`
+through `reachableSub_all` (a dependency cycle, not a style lapse); add any `set_option` (the
+package has none; the gate greps for it); add `@[simp]` attributes (the package uses none —
+`simp` sets stay explicit and tight for the linter); rename `SubInv.core_eq`/`of_lookups`
+(eight call sites, no gain).
+
 ## 6. The gate and the freeze
 
 From this directory, after every change:
@@ -303,6 +519,10 @@ and owner approval.
 
 ## 7. After the cleanup
 
-Exporter schema 2 with the stage-A traces and `pull` labels (slice §14) and the codex harness
-brief; then the r3.1 assurance review (five axes, `docs/reviews/`); then stage B
-(`EffectQueue`, the quiescence assumption A4 discharged as a weak forward simulation, T14′).
+The order of work across both repositories, the lanes that run in parallel with this one, and
+the file-ownership boundaries are in `research/2026-08-23-effect-nats-lanes-plan.md` (Foldable).
+In short: exporter schema 2 with the stage-A traces and `pull` labels (slice §14, corrected) and
+the codex harness brief (effect-nats `docs/architecture/lean-subscriber-trace-replay-brief.md`);
+then the r3.1 assurance review (five axes, `docs/reviews/`); then stage B (`EffectQueue`, the
+quiescence assumption A4 discharged as a weak forward simulation, T14′). This worklist merges
+independently of all of them: the signature probe is the only coupling.
