@@ -428,7 +428,4 @@ theorem subShape_reachable {s : SubState} (h : ReachableSub s) : SubShape s :=
   reachableSub_all ⟨List.Pairwise.nil, fun _ hp => nomatch hp⟩
     (fun _ _ hs hnext => apply_shape hnext hs) h
 
-theorem lookupSub_nextId {s : SubState} (hs : SubShape s) : lookupSub s.subs s.nextId = none :=
-  lookupSub_none_of_fresh (fun p hp => Nat.ne_of_lt (hs.2 p hp))
-
 end EffectNatsSubstrate

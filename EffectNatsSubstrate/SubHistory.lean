@@ -297,9 +297,6 @@ theorem histInv_delete {sH : SubStateH} {name : StreamName} {core' : JSState} {r
         rw [endOne_skip hc] at hm ⊢
         exact hent m hm
 
-theorem liveKeep_admit (sub : Subscriber) (m : StoredMessage) :
-    liveKeep { sub with pending := sub.pending ++ [m], lastEnqueued := m.sequence } = liveKeep sub := rfl
-
 theorem liveOf_admit (committed : List (StreamName × StoredMessage)) (sub : Subscriber)
     (m : StoredMessage) (r : RegInfo) :
     liveOf committed { sub with pending := sub.pending ++ [m], lastEnqueued := m.sequence } r

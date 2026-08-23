@@ -117,9 +117,6 @@ theorem forSubject_dropOldest_other (ms : List StoredMessage) (subject other : S
         · rw [forSubject_cons_self h2, forSubject_cons_self h2, ih]
         · rw [forSubject_cons_other h2, forSubject_cons_other h2, ih]
 
-theorem keepLatest_zero (l : List StoredMessage) : keepLatest 0 l = l := by
-  simp [keepLatest]
-
 theorem keepLatest_of_le {limit : Nat} {l : List StoredMessage} (hpos : limit ≠ 0)
     (hle : l.length ≤ limit) : keepLatest limit l = l := by
   simp [keepLatest, hpos, Nat.sub_eq_zero_of_le hle]

@@ -206,18 +206,6 @@ theorem entrySequences_entry_singleton (m : StoredMessage) :
 
 theorem entrySequences_failed (e : SubError) : entrySequences [Observed.failed e] = [] := rfl
 
-theorem mem_entrySequences {obs : List Observed} {n : StreamSeq} :
-    n ∈ entrySequences obs ↔ ∃ m, Observed.entry m ∈ obs ∧ m.sequence = n := by
-  simp only [entrySequences, List.mem_filterMap]
-  constructor
-  · rintro ⟨o, ho, hn⟩
-    cases o with
-    | entry m => exact ⟨m, ho, by simpa using hn⟩
-    | caughtUp => simp at hn
-    | failed e => simp at hn
-  · rintro ⟨m, hm, hn⟩
-    exact ⟨.entry m, hm, by simp [hn]⟩
-
 /-! ## Equations for `visible` across an admitted message or a drain -/
 
 theorem entrySequences_visible_admit (sub : Subscriber) (m : StoredMessage) :
