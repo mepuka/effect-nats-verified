@@ -220,3 +220,5 @@ open EffectNatsSubstrate
 #print axioms sb3_witness
 #print axioms a4complete_witness
 #print axioms a4inclusion_witness
+#print axioms abstractHistoryFrom_agreeAt
+#print axioms abstractHistoryFrom_strip_pull
