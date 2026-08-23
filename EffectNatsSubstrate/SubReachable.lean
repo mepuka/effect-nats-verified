@@ -72,7 +72,8 @@ theorem afterOp_inv {s : SubState} {core' : JSState} {o : Op} {r : Ret}
           exact lookupStream_updateStream_self _ _ _ _ hl
         · show st.nextSequence
             ≤ (applyPublish st subject payload headers (isRollup headers) now).1.nextSequence
-          simp [applyPublish]
+          rw [applyPublish_nextSequence]
+          exact Nat.le_succ _
       · refine ⟨st₀, ?_, Nat.le_refl _⟩
         show lookupStream core' n = some st₀
         rw [hceq, lookupStream_updateStream_other _ _ _ _ hn]
@@ -83,7 +84,8 @@ theorem afterOp_inv {s : SubState} {core' : JSState} {o : Op} {r : Ret}
         exact lookupStream_updateStream_self _ _ _ _ hl
       · show st.nextSequence
           < (applyPublish st subject payload headers (isRollup headers) now).1.nextSequence
-        simp [applyPublish]
+        rw [applyPublish_nextSequence]
+        exact Nat.lt_succ_self _
   | deleteStream name =>
     have hdel : deleteStep s.core name = .ok (core', r) := hstep
     have hceq := deleteStep_ok_eq hdel

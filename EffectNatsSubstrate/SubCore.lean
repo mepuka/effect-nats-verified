@@ -61,6 +61,12 @@ theorem lookupStream_insertStream_other (s : JSState) (name n : StreamName) (st 
 
 /-! ## The state shape of each successful operation -/
 
+/-- A committed publish advances the head by exactly one. -/
+theorem applyPublish_nextSequence (st : StreamState) (subject : SubjectName)
+    (payload : PayloadHash) (headers : List (String × String)) (rollup : Bool) (now : Nat) :
+    (applyPublish st subject payload headers rollup now).1.nextSequence = st.nextSequence + 1 :=
+  rfl
+
 theorem publishStep_ok_eq {s s' : JSState} {r : Ret} {stream : StreamName}
     {subject : SubjectName} {payload : PayloadHash} {headers : List (String × String)}
     {expected? : Option StreamSeq} {now : Nat}
