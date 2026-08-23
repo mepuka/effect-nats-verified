@@ -149,17 +149,13 @@ theorem afterOp_inv {s : SubState} {core' : JSState} {o : Op} {r : Ret}
 
 theorem applyOp_inv {s s' : SubState} {o : Op} {e : Expect} (hinv : StateInv s)
     (h : applyOp deliverOne s o e = some s') : StateInv s' := by
-  unfold applyOp at h
-  split at h
-  · rename_i core' r r' hstep
-    split at h
-    · cases h; exact afterOp_inv hinv hstep
-    · cases h
-  · rename_i err err' hstep
-    split at h
-    · cases h; exact hinv
-    · cases h
-  · cases h
+  rcases e with r | err
+  · obtain ⟨core', hstep, hs'⟩ := applyOp_ok_eq h
+    rw [hs']
+    exact afterOp_inv hinv hstep
+  · obtain ⟨hs', -⟩ := applyOp_error_eq h
+    rw [hs']
+    exact hinv
 
 theorem applyRegister_inv {s s' : SubState} {stream : StreamName} {opts : ConsumeOptions}
     {l₀ : StreamSeq} {id : SubId} {e : Expect}
@@ -333,23 +329,22 @@ theorem apply_shape {s s' : SubState} {l : Label} (h : apply s l = some s') (hs 
     SubShape s' := by
   cases l with
   | op o e =>
-    have h' : applyOp deliverOne s o e = some s' := h
-    unfold applyOp at h'
-    split at h'
-    · rename_i core' r r' hstep
-      split at h'
-      · cases h'
-        unfold afterOp
-        split
-        · exact shape_of_keys hs (keys_map_snd _ _) (Nat.le_refl _)
-        · exact shape_of_keys hs (keys_map_snd _ _) (Nat.le_refl _)
-        · exact shape_of_keys hs rfl (Nat.le_refl _)
-      · cases h'
-    · rename_i err err' hstep
-      split at h'
-      · cases h'; exact hs
-      · cases h'
-    · cases h'
+    cases e with
+    | ok r =>
+      obtain ⟨core', hstep, rfl⟩ :=
+        applyOp_ok_eq (deliver := deliverOne)
+          (show applyOp deliverOne s o (.ok r) = some s' from h)
+      unfold afterOp
+      split
+      · exact shape_of_keys hs (keys_map_snd _ _) (Nat.le_refl _)
+      · exact shape_of_keys hs (keys_map_snd _ _) (Nat.le_refl _)
+      · exact shape_of_keys hs rfl (Nat.le_refl _)
+    | error err =>
+      obtain ⟨heq, -⟩ :=
+        applyOp_error_eq (deliver := deliverOne)
+          (show applyOp deliverOne s o (.error err) = some s' from h)
+      rw [heq]
+      exact hs
   | register stream opts l₀ id e =>
     obtain ⟨hid, _⟩ :=
       applyRegister_enabled (show applyRegister s stream opts l₀ id e = some s' from h)

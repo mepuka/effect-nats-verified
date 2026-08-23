@@ -412,19 +412,9 @@ theorem histInv_op {sH : SubStateH} {o : Op} {e : Expect} {base' : SubState}
     | lastMessageForSubject stream subject => exact histInv_last hinv hstep
   | error err =>
     have h' : applyOp deliverOne sH.base o (.error err) = some base' := hx
-    unfold applyOp at h'
-    cases hstep : step sH.base.core o with
-    | ok p =>
-      obtain ⟨core', r₀⟩ := p
-      rw [hstep] at h'
-      simp at h'
-    | error err₀ =>
-      rw [hstep] at h'
-      simp only at h'
-      split at h'
-      · cases h'
-        cases o <;> exact hinv
-      · cases h'
+    obtain ⟨heq, -⟩ := applyOp_error_eq h'
+    subst heq
+    cases o <;> exact hinv
 
 theorem histInv_register {sH : SubStateH} {stream : StreamName} {opts : ConsumeOptions}
     {l₀ : StreamSeq} {id : SubId} {e : Expect} {base' : SubState} (hinv : HistInv sH)

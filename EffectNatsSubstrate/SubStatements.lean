@@ -172,38 +172,36 @@ theorem op_visible_frame {s : SubState} {o : Op} {e : Expect} {s' : SubState} {i
     (hnm : ∀ stream subject payload headers x now, o = .publish stream subject payload headers x now →
         (sub.stream ≠ stream ∨ matchesAny sub.filters subject = false))
     (hnd : ∀ name, o ≠ .deleteStream name) : visible sub' = visible sub := by
-  have h' : applyOp deliverOne s o e = some s' := h
-  unfold applyOp at h'
-  split at h'
-  · rename_i core' r r' hstep
-    split at h'
-    · cases h'
-      cases o with
-      | publish stream subject payload headers x now =>
-        cases r with
-        | sequence seq =>
-          obtain rfl := afterOp_publish_sub hb ha
-          rw [deliverOne_skip]
-          rcases hnm stream subject payload headers x now rfl with hne | hfalse
-          · simp [hne]
-          · simp [hfalse]
-        | unit => simp only [afterOp] at ha; rw [hb] at ha; cases ha; rfl
-        | config c => simp only [afterOp] at ha; rw [hb] at ha; cases ha; rfl
-        | message m => simp only [afterOp] at ha; rw [hb] at ha; cases ha; rfl
-      | deleteStream name => exact absurd rfl (hnd name)
-      | createStream raw => simp only [afterOp] at ha; rw [hb] at ha; cases ha; rfl
-      | getStream name => simp only [afterOp] at ha; rw [hb] at ha; cases ha; rfl
-      | lastMessageForSubject stream subject =>
-        simp only [afterOp] at ha; rw [hb] at ha; cases ha; rfl
-    · cases h'
-  · rename_i err err' hstep
-    split at h'
-    · cases h'
-      rw [hb] at ha
-      cases ha
-      rfl
-    · cases h'
-  · cases h'
+  cases e with
+  | ok r =>
+    obtain ⟨core', hstep, rfl⟩ :=
+      applyOp_ok_eq (deliver := deliverOne)
+        (show applyOp deliverOne s o (.ok r) = some s' from h)
+    cases o with
+    | publish stream subject payload headers x now =>
+      cases r with
+      | sequence seq =>
+        obtain rfl := afterOp_publish_sub hb ha
+        rw [deliverOne_skip]
+        rcases hnm stream subject payload headers x now rfl with hne | hfalse
+        · simp [hne]
+        · simp [hfalse]
+      | unit => simp only [afterOp] at ha; rw [hb] at ha; cases ha; rfl
+      | config c => simp only [afterOp] at ha; rw [hb] at ha; cases ha; rfl
+      | message m => simp only [afterOp] at ha; rw [hb] at ha; cases ha; rfl
+    | deleteStream name => exact absurd rfl (hnd name)
+    | createStream raw => simp only [afterOp] at ha; rw [hb] at ha; cases ha; rfl
+    | getStream name => simp only [afterOp] at ha; rw [hb] at ha; cases ha; rfl
+    | lastMessageForSubject stream subject =>
+      simp only [afterOp] at ha; rw [hb] at ha; cases ha; rfl
+  | error err =>
+    obtain ⟨heq, -⟩ :=
+      applyOp_error_eq (deliver := deliverOne)
+        (show applyOp deliverOne s o (.error err) = some s' from h)
+    rw [heq] at ha
+    rw [hb] at ha
+    cases ha
+    rfl
 
 theorem visible_sequences_strict {s : SubState} (h : ReachableSub s) :
     ∀ p ∈ s.subs, (entrySequences (visible p.2)).Pairwise (· < ·) :=

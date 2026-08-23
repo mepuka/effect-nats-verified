@@ -21,32 +21,11 @@ theorem afterOp_core (s : SubState) (core' : JSState) (o : Op) (r : Ret) :
   unfold afterOp
   split <;> rfl
 
-theorem applyOp_core {s s' : SubState} {o : Op} {e : Expect}
-    (h : applyOp deliver s o e = some s') :
-    s'.core = s.core ∨ ∃ r, step s.core o = .ok (s'.core, r) := by
-  unfold applyOp at h
-  split at h
-  · rename_i core' r r' hstep
-    split at h
-    · cases h
-      right
-      refine ⟨r, ?_⟩
-      rw [afterOp_core]
-      exact hstep
-    · cases h
-  · rename_i err err' hstep
-    split at h
-    · cases h
-      left
-      rfl
-    · cases h
-  · cases h
-
 /-- A successful operation with an `.ok` expectation: the exact core step and the
 `afterOp` continuation. -/
 theorem applyOp_ok_eq {s s' : SubState} {o : Op} {r : Ret}
-    (h : applyOp deliverOne s o (.ok r) = some s') :
-    ∃ core', step s.core o = .ok (core', r) ∧ s' = afterOp deliverOne s core' o r := by
+    (h : applyOp deliver s o (.ok r) = some s') :
+    ∃ core', step s.core o = .ok (core', r) ∧ s' = afterOp deliver s core' o r := by
   unfold applyOp at h
   cases hstep : step s.core o with
   | error err =>
@@ -62,6 +41,37 @@ theorem applyOp_ok_eq {s s' : SubState} {o : Op} {r : Ret}
       subst hrr
       exact ⟨core', rfl, rfl⟩
     · cases h
+
+/-- A failed operation with an `.error` expectation: the state is returned unchanged and
+the core step failed with exactly the expected error. -/
+theorem applyOp_error_eq {s s' : SubState} {o : Op} {err : JSError}
+    (h : applyOp deliver s o (.error err) = some s') :
+    s' = s ∧ step s.core o = .error err := by
+  unfold applyOp at h
+  cases hstep : step s.core o with
+  | ok p =>
+    rw [hstep] at h
+    simp at h
+  | error err' =>
+    rw [hstep] at h
+    simp only at h
+    split at h
+    · rename_i hguard
+      cases h
+      refine ⟨rfl, ?_⟩
+      exact congrArg _ hguard
+    · cases h
+
+theorem applyOp_core {s s' : SubState} {o : Op} {e : Expect}
+    (h : applyOp deliver s o e = some s') :
+    s'.core = s.core ∨ ∃ r, step s.core o = .ok (s'.core, r) := by
+  rcases e with r | err
+  · obtain ⟨core', hstep, hs'⟩ := applyOp_ok_eq h
+    refine Or.inr ⟨r, ?_⟩
+    rw [hs', afterOp_core]
+    exact hstep
+  · obtain ⟨hs', hstep⟩ := applyOp_error_eq h
+    exact Or.inl (by rw [hs'])
 
 theorem applyPull_ok_eq {s s' : SubState} {id : SubId}
     (h : applyPull pull s id = some s') :
