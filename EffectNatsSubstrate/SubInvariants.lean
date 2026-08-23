@@ -44,4 +44,12 @@ structure SubInv (s : SubState) (sub : Subscriber) : Prop where
 
 def StateInv (s : SubState) : Prop := ∀ p ∈ s.subs, SubInv s p.2
 
+/-- State shape (slice document §9.2 `subShape`): subscriber ids are strictly
+ascending in `subs` — the JS `Set`'s insertion order is registration order —
+and every id is below `nextId`, which is what `lookupSub` after `register`
+relies on (SA4a). Preserved by `apply`; proved over `ReachableSub` as
+`subShape_reachable`. -/
+def SubShape (s : SubState) : Prop :=
+  (s.subs.map Prod.fst).Pairwise (· < ·) ∧ ∀ p ∈ s.subs, p.1 < s.nextId
+
 end EffectNatsSubstrate

@@ -16,7 +16,7 @@ stage B. Every carrier here is plain data so that traces check by `decide`.
 namespace EffectNatsSubstrate
 
 /-- Registration order; also the fan-out order (the JS `Set` iterates in
-insertion order, `:177`). -/
+insertion order, `:182`). -/
 abbrev SubId := Nat
 
 /-- `ConsumeBuffer` restricted to stage A. `n ≥ 1` is enforced at the seam
@@ -78,9 +78,9 @@ structure Subscriber where
   /-- The bounded queue's buffer, oldest first. -/
   pending : List StoredMessage
   status : QueueStatus
-  /-- Membership in the stream's `Set` (`:242-245`, removed at `:183` on overflow). -/
+  /-- Membership in the stream's `Set` (`:242-245`, removed at `:188` on overflow). -/
   registered : Bool
-  /-- The implementation's `lastDelivered` (`:195`): advanced on enqueue, never on
+  /-- The implementation's `lastDelivered` (`:200`): advanced on enqueue, never on
   the overflowing message. -/
   lastEnqueued : StreamSeq
   /-- What the consumer has pulled so far. -/

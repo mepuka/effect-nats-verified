@@ -3,10 +3,13 @@
 Executable Lean 4 reference model of the **sequential core** of effect-nats's in-memory
 JetStream interpreter (`mepuka/effect-nats` @ `d06223f`): configuration, subject matching,
 stream storage, and the five non-streaming operations, with the sequential-core invariant
-proofs (T1–T7) and kernel-checked worked traces. Scope, corrected obligations, and deferrals
-are fixed by
-[the first-slice proposal](../../research/2026-08-22-first-slice-jetstream-memory-lean-model.md);
-this package implements exactly its §3 bootstrap boundary.
+proofs (T1–T7) and kernel-checked worked traces — and, since stage A (pin `872bd7f`, snapshot
+r3 proposed), the `TerminateOnLag` subscriber layer over that core: registration with every
+start position, bounded pending buffers, whole-buffer pulls, overflow-terminates, deletion,
+unsubscribe. Scope, corrected obligations, and deferrals are fixed by
+[the first-slice proposal](../../research/2026-08-22-first-slice-jetstream-memory-lean-model.md)
+and [the stage-A slice document](../../research/2026-08-22-subscriber-stage-a.md); this package
+implements exactly their boundaries.
 
 It separates three questions:
 
@@ -27,9 +30,11 @@ Fidelity to the TypeScript interpreter is claimed only under the seam's declared
 restrictions — unique header keys (the seam's `ReadonlyMap`; the model's lookup is first-match)
 and non-negative capacity — and only as compatibility on replayed histories.
 
-Deliberately small: no subscribers, no consume/buffer policies, no JSONL trace ingestion, no
-`.nuscr` printer — deferred until the pending/pull subscriber semantics are frozen (proposal
-§4.3, §6; design note `research/2026-08-22-effect-nats-subscriber-model-design-note.md`).
+Deliberately small: no `PullWindow`/`Blocked`, no `EffectQueue` runtime model (stage B), no
+JSONL trace ingestion, no `.nuscr` printer. The subscriber layer's queue facts Q1–Q3 and its
+quiescence assumption A4 are named, not proved, until stage B; nothing here is a statement
+about Effect `Queue`, the TypeScript interpreter, or `nats-server` beyond compatibility on
+replayed histories.
 This is the parent discussion's (§18) trace-replay bridge at its honest size: the sequential
 spine first, kernel-checked traces standing in for the replay harness until the
 observation-ordering question is answered.
@@ -37,7 +42,7 @@ observation-ordering question is answered.
 ## Run
 
 ```text
-lake build                                   # every module, all proofs, the eight kernel-checked traces
+lake build                                   # every module, all proofs, the sixteen kernel-checked traces
 lake build effect_nats_traces
 lake exe effect_nats_traces [-- --foldable-commit <hash>] > fixture.json   # deterministic replay fixture
 ```
@@ -58,6 +63,16 @@ EffectNatsSubstrate/
   Views.lean       forSubject through publishBase / newMessage / pruneSubject
   Proofs.lean      T1–T7; zero sorry; standard axioms only
   Traces.lean      Trace / TraceStep / Expect / ViewCheck, runTrace, eight traces, kernel-checked
+  Subscriber.lean  stage A carriers: Policy, StartPosition, ConsumeOptions, QueueStatus, Observed,
+                   Subscriber, SubState (pin 872bd7f)
+  SelectReplay.lean  selectReplay (five start positions over matchesAny), replayObserved
+  Next.lean        Label; deliverOne / endOne / pullStep; replayBound; apply / Next / ReachableSub
+  SubTraces.lean   SubTrace runner, eight stage-A traces (C7–C10, C13–C15, M1, Q1), W1/W2 wrong models
+  SubInvariants.lean  visible, entrySequences, SubInv (eleven clauses), StateInv, SubShape
+  SubCore.lean     lookup and step-shape lemmas over the core
+  SubProofs.lean   per-label preservation of SubInv; SA1 frame; selectReplay lemmas
+  SubReachable.lean  the only ReachableSub induction: SA2 stateInv_reachable, SA3 pending_le_capacity
+  SubStatements.lean SA4–SA7 statements (snapshot r3, proposed)
 Main.lean          exporter: lake exe effect_nats_traces → JSON fixture (the only module importing Lean)
 ```
 
@@ -68,7 +83,9 @@ a committed publish — the published subject's view becomes
 `keepLatest limit (prior-or-[] ++ [new])`, every other subject's view is unchanged — and
 `Proofs.lean` works from those.
 
-[docs/signature-snapshot.md](docs/signature-snapshot.md) freezes the public proof surface.
+[docs/signature-snapshot.md](docs/signature-snapshot.md) freezes the public proof surface
+(r1–r2.1 frozen; stage A's r3 proposed, pending owner ratification); assurance reviews live in
+`docs/reviews/`.
 Naming follows the corpus conventions: distinct identifier names (`StreamName`, `SubjectName`,
 `StreamSeq`, `PayloadHash`), a deterministic `step` now with the nondeterministic `Next`
 relation reserved for the subscriber slice, and `step`/`Reachable` vocabulary compatible with

@@ -38,10 +38,10 @@ inductive Label where
   | unsubscribe (id : SubId)
   deriving Repr, DecidableEq
 
-/-- Fan-out to one subscriber for a stored message of `stream` (`:176-199`):
+/-- Fan-out to one subscriber for a stored message of `stream` (`:181-200`):
 `TerminateOnLag` with a full buffer leaves the `Set` and fails the queue with
-the *pre-overflow* `lastDelivered` (`:181-192`); otherwise the message is
-offered and `lastDelivered` advances (`:194-195`), the offer's result being
+the *pre-overflow* `lastDelivered` (`:185-195`); otherwise the message is
+offered and `lastDelivered` advances (`:199-200`), the offer's result being
 discarded even when the queue is no longer open. -/
 def deliverOne (stream : StreamName) (m : StoredMessage) (sub : Subscriber) : Subscriber :=
   if sub.stream == stream && sub.registered && matchesAny sub.filters m.subject then
@@ -60,7 +60,7 @@ def deliverOne (stream : StreamName) (m : StoredMessage) (sub : Subscriber) : Su
   else sub
 
 /-- `deleteStream` fails every queue still in the `Set` with `StreamNotFound`
-(`:126-135`); Q2 decides `closing` versus `done`. -/
+(`:127-136`); Q2 decides `closing` versus `done`. -/
 def endOne (stream : StreamName) (sub : Subscriber) : Subscriber :=
   if sub.stream == stream && sub.registered then
     { sub with
