@@ -275,6 +275,41 @@ theorem SubInv.of_lookups {s s' : SubState} {sub : Subscriber} (hinv : SubInv s 
 
 /-! ## Preservation under fan-out and deletion -/
 
+theorem deliverOne_admit {stream : StreamName} {m : StoredMessage} {sub : Subscriber} {n : Nat}
+    (hcond : (sub.stream == stream && sub.registered && matchesAny sub.filters m.subject) = true)
+    (hpol : sub.policy = .terminateOnLag n) (hroom : sub.pending.length < n)
+    (ho : sub.status = .opened) :
+    deliverOne stream m sub = { sub with pending := sub.pending ++ [m], lastEnqueued := m.sequence } := by
+  unfold deliverOne
+  rw [if_pos hcond]
+  simp only [hpol]
+  rw [if_neg (Nat.not_le.mpr hroom), if_pos ho]
+
+theorem deliverOne_overflow {stream : StreamName} {m : StoredMessage} {sub : Subscriber} {n : Nat}
+    (hcond : (sub.stream == stream && sub.registered && matchesAny sub.filters m.subject) = true)
+    (hpol : sub.policy = .terminateOnLag n) (hfull : n ≤ sub.pending.length) :
+    deliverOne stream m sub =
+      { sub with
+          registered := false
+          status :=
+            if sub.pending.isEmpty then .done (.consumerLagged stream sub.lastEnqueued)
+            else .closing (.consumerLagged stream sub.lastEnqueued) } := by
+  unfold deliverOne
+  rw [if_pos hcond]
+  simp only [hpol]
+  rw [if_pos hfull]
+
+theorem deliverOne_skip {stream : StreamName} {m : StoredMessage} {sub : Subscriber}
+    (hcond : (sub.stream == stream && sub.registered && matchesAny sub.filters m.subject) = false) :
+    deliverOne stream m sub = sub := by
+  unfold deliverOne
+  rw [if_neg (by simp [hcond])]
+
+theorem endOne_skip {name : StreamName} {sub : Subscriber}
+    (hcond : (sub.stream == name && sub.registered) = false) : endOne name sub = sub := by
+  unfold endOne
+  rw [if_neg (by simp [hcond])]
+
 theorem deliverOne_inv {s s' : SubState} {stream : StreamName} {st : StreamState}
     {m : StoredMessage} {sub : Subscriber} (hinv : SubInv s sub)
     (hl : lookupStream s.core stream = some st) (hseq : m.sequence = st.nextSequence)
@@ -282,81 +317,80 @@ theorem deliverOne_inv {s s' : SubState} {stream : StreamName} {st : StreamState
       ∃ st₁, lookupStream s'.core n = some st₁ ∧ st₀.nextSequence ≤ st₁.nextSequence)
     (hbump : ∃ st', lookupStream s'.core stream = some st' ∧ st.nextSequence < st'.nextSequence) :
     SubInv s' (deliverOne stream m sub) := by
-  unfold deliverOne
-  split
-  · rename_i hcond
-    simp only [Bool.and_eq_true, beq_iff_eq] at hcond
-    obtain ⟨⟨hstream, hreg⟩, hmatch⟩ := hcond
+  by_cases hcond : (sub.stream == stream && sub.registered && matchesAny sub.filters m.subject) = true
+  · obtain ⟨⟨hstream, hreg⟩, hmatch⟩ := by
+      simpa only [Bool.and_eq_true, beq_iff_eq] using hcond
     have hopen : sub.status = .opened := hinv.registeredOpen hreg
     obtain ⟨st₀, hl₀, hlt₀⟩ := hinv.registeredStream hreg
     rw [hstream, hl] at hl₀
     cases hl₀
-    have hcapPos : 1 ≤ sub.policy.capacity := hinv.capacityPos
-    split
-    rename_i n hpol
-    rw [hpol] at hcapPos
-    simp only [Policy.capacity] at hcapPos
-    by_cases hfull : n ≤ sub.pending.length
-    · rw [if_pos hfull]
-      have hne : sub.pending ≠ [] := by
-        intro hnil
-        rw [hnil] at hfull
-        simp at hfull
-        omega
-      have hempty : sub.pending.isEmpty = false := by
-        cases hp : sub.pending with
-        | nil => exact absurd hp hne
-        | cons _ _ => rfl
-      rw [if_neg (by rw [hempty]; decide)]
-      refine ⟨hinv.capacityPos, hinv.capacity, ?_, ?_, ?_, ?_, ?_, hinv.pendingMatch,
-        hinv.visibleStrict, hinv.visibleBound, hinv.pendingLast⟩
-      · intro hr; cases hr
-      · intro hr; cases hr
-      · intro e h; exact hne
-      · intro e h; cases h
-      · intro h; cases h
-    · rw [if_neg hfull, if_pos hopen]
-      have hlt : sub.pending.length < n := Nat.lt_of_not_le hfull
-      obtain ⟨st', hl', hbump'⟩ := hbump
-      have hvis := entrySequences_visible_admit sub m
-      refine ⟨hinv.capacityPos, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
-      · show (sub.pending ++ [m]).length ≤ sub.policy.capacity
-        rw [hpol, List.length_append, List.length_singleton]
-        simp only [Policy.capacity]
-        omega
-      · intro _; exact hopen
-      · intro _
-        refine ⟨st', ?_, ?_⟩
-        · show lookupStream s'.core sub.stream = some st'
-          rw [hstream]; exact hl'
-        · show m.sequence < st'.nextSequence
-          rw [hseq]; exact hbump'
-      · intro e h; have h' : sub.status = .closing e := h; simp [hopen] at h'
-      · intro e h; have h' : sub.status = .done e := h; simp [hopen] at h'
-      · intro h; have h' : sub.status = .shutDown := h; simp [hopen] at h'
-      · intro m' hm'
-        have hm'' : m' ∈ sub.pending ++ [m] := hm'
-        rcases List.mem_append.mp hm'' with hold | hnew
-        · exact hinv.pendingMatch m' hold
-        · rw [List.mem_singleton.mp hnew]; exact hmatch
-      · rw [hvis]
-        apply pairwise_lt_append_singleton hinv.visibleStrict
-        intro y hy
-        have := hinv.visibleBound y hy
-        rw [hseq]
-        exact Nat.lt_of_le_of_lt this hlt₀
-      · intro y hy
-        rw [hvis] at hy
-        show y ≤ m.sequence
-        rcases List.mem_append.mp hy with hold | hnew
-        · have := hinv.visibleBound y hold
+    cases hpol : sub.policy with
+    | terminateOnLag n =>
+      have hcapPos : 1 ≤ sub.policy.capacity := hinv.capacityPos
+      rw [hpol] at hcapPos
+      simp only [Policy.capacity] at hcapPos
+      by_cases hfull : n ≤ sub.pending.length
+      · rw [deliverOne_overflow hcond hpol hfull]
+        have hne : sub.pending ≠ [] := by
+          intro hnil
+          rw [hnil] at hfull
+          simp at hfull
+          omega
+        have hempty : sub.pending.isEmpty = false := by
+          cases hp : sub.pending with
+          | nil => exact absurd hp hne
+          | cons _ _ => rfl
+        rw [if_neg (by rw [hempty]; decide)]
+        refine ⟨hinv.capacityPos, hinv.capacity, ?_, ?_, ?_, ?_, ?_, hinv.pendingMatch,
+          hinv.visibleStrict, hinv.visibleBound, hinv.pendingLast⟩
+        · intro hr; cases hr
+        · intro hr; cases hr
+        · intro e h; exact hne
+        · intro e h; cases h
+        · intro h; cases h
+      · rw [deliverOne_admit hcond hpol (Nat.lt_of_not_le hfull) hopen]
+        have hlt : sub.pending.length < n := Nat.lt_of_not_le hfull
+        obtain ⟨st', hl', hbump'⟩ := hbump
+        have hvis := entrySequences_visible_admit sub m
+        refine ⟨hinv.capacityPos, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+        · show (sub.pending ++ [m]).length ≤ sub.policy.capacity
+          rw [hpol, List.length_append, List.length_singleton]
+          simp only [Policy.capacity]
+          omega
+        · intro _; exact hopen
+        · intro _
+          refine ⟨st', ?_, ?_⟩
+          · show lookupStream s'.core sub.stream = some st'
+            rw [hstream]; exact hl'
+          · show m.sequence < st'.nextSequence
+            rw [hseq]; exact hbump'
+        · intro e h; have h' : sub.status = .closing e := h; simp [hopen] at h'
+        · intro e h; have h' : sub.status = .done e := h; simp [hopen] at h'
+        · intro h; have h' : sub.status = .shutDown := h; simp [hopen] at h'
+        · intro m' hm'
+          have hm'' : m' ∈ sub.pending ++ [m] := hm'
+          rcases List.mem_append.mp hm'' with hold | hnew
+          · exact hinv.pendingMatch m' hold
+          · rw [List.mem_singleton.mp hnew]; exact hmatch
+        · rw [hvis]
+          apply pairwise_lt_append_singleton hinv.visibleStrict
+          intro y hy
+          have := hinv.visibleBound y hy
           rw [hseq]
-          exact Nat.le_of_lt (Nat.lt_of_le_of_lt this hlt₀)
-        · rw [List.mem_singleton.mp hnew]; exact Nat.le_refl _
-      · intro _
-        show ((sub.pending ++ [m]).map (·.sequence)).getLast? = some m.sequence
-        simp
-  · exact SubInv.of_lookups hinv hcore
+          exact Nat.lt_of_le_of_lt this hlt₀
+        · intro y hy
+          rw [hvis] at hy
+          show y ≤ m.sequence
+          rcases List.mem_append.mp hy with hold | hnew
+          · have := hinv.visibleBound y hold
+            rw [hseq]
+            exact Nat.le_of_lt (Nat.lt_of_le_of_lt this hlt₀)
+          · rw [List.mem_singleton.mp hnew]; exact Nat.le_refl _
+        · intro _
+          show ((sub.pending ++ [m]).map (·.sequence)).getLast? = some m.sequence
+          simp
+  · rw [deliverOne_skip (by simpa using hcond)]
+    exact SubInv.of_lookups hinv hcore
 
 theorem endOne_inv {s s' : SubState} {name : StreamName} {sub : Subscriber} (hinv : SubInv s sub)
     (hcore : ∀ n st₀, n ≠ name → lookupStream s.core n = some st₀ →

@@ -67,43 +67,6 @@ theorem publish_sub {s s' : SubState} {stream : StreamName} {subject : SubjectNa
   obtain ⟨core', _, rfl⟩ := applyOp_ok_eq h
   exact afterOp_publish_sub hb ha
 
-/-! ## The three faces of `deliverOne` -/
-
-theorem deliverOne_admit {stream : StreamName} {m : StoredMessage} {sub : Subscriber} {n : Nat}
-    (hcond : (sub.stream == stream && sub.registered && matchesAny sub.filters m.subject) = true)
-    (hpol : sub.policy = .terminateOnLag n) (hroom : sub.pending.length < n)
-    (ho : sub.status = .opened) :
-    deliverOne stream m sub = { sub with pending := sub.pending ++ [m], lastEnqueued := m.sequence } := by
-  unfold deliverOne
-  rw [if_pos hcond]
-  simp only [hpol]
-  rw [if_neg (Nat.not_le.mpr hroom), if_pos ho]
-
-theorem deliverOne_overflow {stream : StreamName} {m : StoredMessage} {sub : Subscriber} {n : Nat}
-    (hcond : (sub.stream == stream && sub.registered && matchesAny sub.filters m.subject) = true)
-    (hpol : sub.policy = .terminateOnLag n) (hfull : n ≤ sub.pending.length) :
-    deliverOne stream m sub =
-      { sub with
-          registered := false
-          status :=
-            if sub.pending.isEmpty then .done (.consumerLagged stream sub.lastEnqueued)
-            else .closing (.consumerLagged stream sub.lastEnqueued) } := by
-  unfold deliverOne
-  rw [if_pos hcond]
-  simp only [hpol]
-  rw [if_pos hfull]
-
-theorem deliverOne_skip {stream : StreamName} {m : StoredMessage} {sub : Subscriber}
-    (hcond : (sub.stream == stream && sub.registered && matchesAny sub.filters m.subject) = false) :
-    deliverOne stream m sub = sub := by
-  unfold deliverOne
-  rw [if_neg (by simp [hcond])]
-
-theorem endOne_skip {name : StreamName} {sub : Subscriber}
-    (hcond : (sub.stream == name && sub.registered) = false) : endOne name sub = sub := by
-  unfold endOne
-  rw [if_neg (by simp [hcond])]
-
 /-! ## SA4a — registration materializes the snapshot -/
 
 theorem register_observed {s s' : SubState} {stream : StreamName} {opts : ConsumeOptions}
