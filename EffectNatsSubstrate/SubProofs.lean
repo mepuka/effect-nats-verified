@@ -94,20 +94,66 @@ theorem applyUnsubscribe_ok_eq {s s' : SubState} {id : SubId}
       cases h
       exact ⟨sub, hsub, fun heq => hne heq, rfl⟩
 
-theorem applyRegister_core {s s' : SubState} {stream : StreamName} {opts : ConsumeOptions}
+/-- The two successful registration shapes: the missing-stream report leaves the state
+unchanged; a real registration appends the fresh subscriber and bumps `nextId`. -/
+theorem applyRegister_ok_eq {s s' : SubState} {stream : StreamName} {opts : ConsumeOptions}
     {l₀ : StreamSeq} {id : SubId} {e : Expect}
-    (h : applyRegister s stream opts l₀ id e = some s') : s'.core = s.core := by
+    (h : applyRegister s stream opts l₀ id e = some s') :
+    (lookupStream s.core stream = none ∧ e = .error (.streamNotFound stream) ∧ s' = s)
+    ∨ (∃ st, lookupStream s.core stream = some st ∧ e = .ok .unit ∧
+        replayBound st.messages opts l₀ st.nextSequence = true ∧
+        s' = { s with
+               subs := s.subs ++ [(id, newSubscriber stream opts l₀ st.messages)],
+               nextId := id + 1 }) := by
   unfold applyRegister at h
   split at h
   · cases h
-  · split at h
-    · split at h
-      · cases h; rfl
-      · cases h
-    · split at h
-      · cases h; rfl
-      · cases h
-    · cases h
+  · rename_i _hguard
+    cases hl : lookupStream s.core stream with
+    | none =>
+      rw [hl] at h
+      cases e with
+      | ok r => simp at h
+      | error err =>
+        cases err with
+        | streamNotFound n =>
+          by_cases hns : n = stream
+          · have h' : (if n = stream then some s else none) = some s' := h
+            rw [if_pos hns] at h'
+            cases h'
+            refine Or.inl ⟨rfl, ?_, rfl⟩
+            rw [← hns]
+          · have h' : (if n = stream then some s else none) = some s' := h
+            rw [if_neg hns] at h'
+            cases h'
+        | _ => simp at h
+    | some st =>
+      rw [hl] at h
+      cases e with
+      | error err => simp at h
+      | ok r =>
+        cases r with
+        | config c => simp at h
+        | sequence n => simp at h
+        | message m => simp at h
+        | unit =>
+          have h' : (if replayBound st.messages opts l₀ st.nextSequence then some
+              { s with subs := s.subs ++ [(id, newSubscriber stream opts l₀ st.messages)],
+                       nextId := id + 1 }
+              else none) = some s' := h
+          by_cases hb : replayBound st.messages opts l₀ st.nextSequence = true
+          · rw [if_pos hb] at h'
+            cases h'
+            exact Or.inr ⟨st, rfl, rfl, hb, rfl⟩
+          · rw [if_neg hb] at h'
+            cases h'
+
+theorem applyRegister_core {s s' : SubState} {stream : StreamName} {opts : ConsumeOptions}
+    {l₀ : StreamSeq} {id : SubId} {e : Expect}
+    (h : applyRegister s stream opts l₀ id e = some s') : s'.core = s.core := by
+  rcases applyRegister_ok_eq h with ⟨_, _, heq⟩ | ⟨_, _, _, _, heq⟩
+  · rw [heq]
+  · rw [heq]
 
 theorem applyPull_core {s s' : SubState} {id : SubId}
     (h : applyPull pull s id = some s') : s'.core = s.core := by

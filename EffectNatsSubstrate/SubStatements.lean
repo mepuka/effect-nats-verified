@@ -57,24 +57,13 @@ theorem register_observed {s s' : SubState} {stream : StreamName} {opts : Consum
       lookupSub s'.subs id = some (newSubscriber stream opts l₀ st.messages) := by
   have h' : applyRegister s stream opts l₀ id (.ok .unit) = some s' := h
   obtain ⟨hid, _⟩ := applyRegister_enabled h'
-  unfold applyRegister at h'
-  split at h'
-  · cases h'
-  · cases hl : lookupStream s.core stream with
-    | none =>
-      rw [hl] at h'
-      simp at h'
-    | some st =>
-      rw [hl] at h'
-      simp only at h'
-      split at h'
-      · cases h'
-        refine ⟨st, rfl, ?_⟩
-        apply lookupSub_append_fresh
-        intro p hp
-        rw [hid]
-        exact Nat.ne_of_lt (hs.2 p hp)
-      · cases h'
+  rcases applyRegister_ok_eq h' with ⟨_, he, _⟩ | ⟨st, hl', _, _, rfl⟩
+  · exact absurd he (by simp)
+  · refine ⟨st, hl', ?_⟩
+    apply lookupSub_append_fresh
+    intro p hp
+    rw [hid]
+    exact Nat.ne_of_lt (hs.2 p hp)
 
 /-! ## SA4c — `lastPerSubject` through `lastForSubject` -/
 

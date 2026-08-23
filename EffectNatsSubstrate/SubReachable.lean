@@ -166,26 +166,15 @@ theorem applyRegister_inv {s s' : SubState} {stream : StreamName} {opts : Consum
     (hreach : Reachable s.core) (hinv : StateInv s)
     (h : applyRegister s stream opts l₀ id e = some s') : StateInv s' := by
   have hcap : opts.buffer.capacity ≠ 0 := (applyRegister_enabled h).2
-  unfold applyRegister at h
-  split at h
-  · cases h
-  · rename_i _hguard
-    split at h
-    · split at h
-      · cases h; exact hinv
-      · cases h
-    · rename_i st hl
-      split at h
-      · rename_i hbound
-        cases h
-        intro p hp
-        have hp' : p ∈ s.subs ++ [(id, newSubscriber stream opts l₀ st.messages)] := hp
-        rcases List.mem_append.mp hp' with hold | hnew
-        · exact (hinv p hold).core_eq rfl
-        · rw [List.mem_singleton.mp hnew]
-          exact newSubscriber_inv hl hcap hbound (reachable_sequences_strict hreach hl).1
-      · cases h
-    · cases h
+  rcases applyRegister_ok_eq h with ⟨_, _, heq⟩ | ⟨st, hl, _, hb, heq⟩
+  · rw [heq]; exact hinv
+  · rw [heq]
+    intro p hp
+    have hp' : p ∈ s.subs ++ [(id, newSubscriber stream opts l₀ st.messages)] := hp
+    rcases List.mem_append.mp hp' with hold | hnew
+    · exact (hinv p hold).core_eq rfl
+    · rw [List.mem_singleton.mp hnew]
+      exact newSubscriber_inv hl hcap hb (reachable_sequences_strict hreach hl).1
 
 theorem applyPull_inv {s s' : SubState} {id : SubId} (hinv : StateInv s)
     (h : applyPull pullStep s id = some s') : StateInv s' := by
@@ -362,37 +351,31 @@ theorem apply_shape {s s' : SubState} {l : Label} (h : apply s l = some s') (hs 
       · cases h'
     · cases h'
   | register stream opts l₀ id e =>
-    have h' : applyRegister s stream opts l₀ id e = some s' := h
-    obtain ⟨hid, _⟩ := applyRegister_enabled h'
-    unfold applyRegister at h'
-    split at h'
-    · cases h'
-    · split at h'
-      · split at h'
-        · cases h'; exact hs
-        · cases h'
-      · split at h'
-        · cases h'
-          obtain ⟨hasc, hids⟩ := hs
-          refine ⟨?_, ?_⟩
-          · show ((s.subs ++ [(id, _)]).map Prod.fst).Pairwise (· < ·)
-            rw [List.map_append]
-            apply pairwise_append_singleton hasc
-            intro y hy
-            obtain ⟨q, hq, hqy⟩ := List.mem_map.mp hy
-            rw [← hqy, hid]
-            exact hids q hq
-          · intro p hp
-            have hp' : p ∈ s.subs ++ [(id, _)] := hp
-            rcases List.mem_append.mp hp' with hold | hnew
-            · show p.1 < id + 1
-              have := hids p hold
-              rw [← hid] at this
-              exact Nat.lt_succ_of_lt this
-            · rw [List.mem_singleton.mp hnew]
-              exact Nat.lt_succ_self id
-        · cases h'
-      · cases h'
+    obtain ⟨hid, _⟩ :=
+      applyRegister_enabled (show applyRegister s stream opts l₀ id e = some s' from h)
+    rcases applyRegister_ok_eq (s' := s')
+        (show applyRegister s stream opts l₀ id e = some s' from h)
+      with ⟨_, _, heq⟩ | ⟨st, hl, _, _, heq⟩
+    · rw [heq]; exact hs
+    · rw [heq]
+      obtain ⟨hasc, hids⟩ := hs
+      refine ⟨?_, ?_⟩
+      · show ((s.subs ++ [(id, _)]).map Prod.fst).Pairwise (· < ·)
+        rw [List.map_append]
+        apply pairwise_append_singleton hasc
+        intro y hy
+        obtain ⟨q, hq, hqy⟩ := List.mem_map.mp hy
+        rw [← hqy, hid]
+        exact hids q hq
+      · intro p hp
+        have hp' : p ∈ s.subs ++ [(id, _)] := hp
+        rcases List.mem_append.mp hp' with hold | hnew
+        · show p.1 < id + 1
+          have := hids p hold
+          rw [← hid] at this
+          exact Nat.lt_succ_of_lt this
+        · rw [List.mem_singleton.mp hnew]
+          exact Nat.lt_succ_self id
   | pull id =>
     obtain ⟨_, _, _, _, heq⟩ :=
       applyPull_ok_eq (s' := s') (show applyPull pullStep s id = some s' from h)
