@@ -12,6 +12,7 @@ import EffectNatsSubstrate.Subscriber
 import EffectNatsSubstrate.SelectReplay
 import EffectNatsSubstrate.Next
 import EffectNatsSubstrate.SubTraces
+import EffectNatsSubstrate.SubPlacements
 import EffectNatsSubstrate.SubInvariants
 import EffectNatsSubstrate.SubCore
 import EffectNatsSubstrate.SubProofs

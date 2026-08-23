@@ -331,3 +331,14 @@ Owner of every entry: the Claude lane; the two reviews were left unedited above 
 - [claude | — | Spec: SA5–SA7, `apply … = none` witnesses, T1–T7 instances, schema 2] DEFERRED — statements now in the snapshot (`all_sub_negatives`, `sub_core_inv`, SA4d, SA5h); proofs after ratification; schema 2 is SA9.
 - [claude | — | LR-01] no change — the declared F5 boundary; no document claims a verified seam. [LR-02] = F6 APPLIED. [LR-03] = F3 APPLIED. [LR-04] APPLIED as SA5h. [LR-05, LR-07, LR-08] no change — scope statements, agreed. [LR-06] = SA9, pending. [referee §1.3] = F8 APPLIED.
 - done — applied 20, rejected 2, deferred 4, no change 7.
+
+Correct pass of 2026-08-23 — the L0 encoding step of `research/2026-08-23-effect-nats-lanes-plan.md`; findings are the drift between slice document §14 and the Lean trace data found while encoding schema 2, plus the ratified decisions P1 and P2. Owner: the Claude lane. Every entry re-verified against the tree at Foldable `fafb16f` (precedence tree > pass > document).
+
+- [claude | research/2026-08-22-subscriber-stage-a.md §14 | Spec: schema-2 events] APPLIED — `"caughtUp"` as a bare string → `_tag` objects in the seam's vocabulary (`Entry`/`CaughtUp`/`Failed`; `ConsumerLagged.lastDeliveredSequence`), matching every other encoder in `Main.lean` and the seam's `ConsumeEvent` and `ConsumerLagged` (`ens:src/internal/JetStream.ts:26-28`, `:130-133`).
+- [claude | same | Spec: counts] APPLIED — "final `subscriberCount` expectations" → `counts` per step, which is what `SubTraceStep.counts` carries and `checkCounts` checks after each label (`SubTraces.lean:30`, `:51-53`).
+- [claude | same | Spec: finalObserved] APPLIED — the runner's last check (`checkFinal`, `SubTraces.lean:70-72`) was absent from §14; printed as `finalObserved`.
+- [claude | same | Spec: key name] APPLIED (wording only) — `lastEnqueued` named as the JSON key of the label field `lastEnqueued₀`.
+- [claude | same | P1] APPLIED — `freeRunning.outcomes` added: chunk histories over every placement of one subscriber's pulls, with the per-subscriber independence assumption named and the unsubscribe-after-finish convention fixed; histories rather than final `observed` lists because W1 on `sa-drain` reaches final lists the correct model also reaches.
+- [claude | same | P2] APPLIED — two fixture files; `--subscriber`; the sequential fixture and default output byte-identical.
+- [claude | — | Spec: replay flag (proof map §5 item 9)] no change — no `replay` flag on `SubTraceStep`: every stage-A step is realisable by the memory interpreter (valid `createStream`, `publish`, `deleteStream`, `getStream` → `StreamNotFound`); the open question is closed.
+- done — applied 6, rejected 0, deferred 0, no change 1.

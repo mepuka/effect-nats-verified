@@ -81,12 +81,15 @@ a replay records.
 ```text
 lake build                                # every module, every proof, the sixteen traces
 lake build effect_nats_traces
-lake exe effect_nats_traces [-- --foldable-commit <hash>] > fixture.json
+lake exe effect_nats_traces [-- --foldable-commit <hash>] > sequential-traces.json   # schema 1
+lake exe effect_nats_traces -- --subscriber [--foldable-commit <hash>] > subscriber-traces.json   # schema 2
 ```
 
-The exporter is deterministic: two runs produce identical bytes. effect-nats keeps the fixture
-at `test/fixtures/lean/` with the producing commit embedded and regenerates it by hand when the
-traces change.
+The exporter is deterministic: two runs of either mode produce identical bytes. Schema 2 prints
+the stage-A subscriber traces as labels with their `events`, `counts`, `finalObserved`, and each
+subscriber's free-running acceptance set (`SubPlacements.lean`; slice document §14). effect-nats
+keeps both fixtures at `test/fixtures/lean/` with the producing commit embedded and regenerates
+them by hand when the traces change.
 
 ## Layout
 

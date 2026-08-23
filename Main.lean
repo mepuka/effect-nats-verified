@@ -4,11 +4,14 @@ import Lean.Data.Json
 /-!
 # Trace exporter
 
-`lake exe effect_nats_traces [--foldable-commit <hash>]` prints `allTraces` as a
-JSON fixture for the effect-nats replay harness. The output is a pure function
+`lake exe effect_nats_traces [--subscriber] [--foldable-commit <hash>]` prints a
+JSON fixture for the effect-nats replay harness: by default `allTraces` (schema 1,
+the sequential core); with `--subscriber`, `allSubTraces` (schema 2, the stage-A
+subscriber traces with their pull labels and free-running acceptance sets —
+slice document §14). The output is a pure function
 of the package sources and the optional argument: no timestamps, no paths, no
-randomness (Foldable law 4). Steps with `replay := false` are omitted and
-counted.
+randomness (Foldable law 4). Schema-1 steps with `replay := false` are omitted
+and counted; every schema-2 step is realisable.
 
 Encoding contract (read by the harness):
 
@@ -133,18 +136,112 @@ def fixture (foldableCommit : Option String) : Json :=
     , ("compare", Json.mkObj [("ignore", Json.arr #[Json.str "timestampMillis"])])
     , ("traces", Json.arr (allTraces.map trace).toArray) ]
 
+/-! ## Schema 2 — the stage-A subscriber traces (slice document §14) -/
+
+def startPosition : StartPosition → Json
+  | .allHistory => Json.mkObj [("_tag", "AllHistory")]
+  | .lastPerSubject => Json.mkObj [("_tag", "LastPerSubject")]
+  | .newOnly => Json.mkObj [("_tag", "NewOnly")]
+  | .fromSequence n => Json.mkObj [("_tag", "FromSequence"), ("sequence", seq n)]
+  | .afterSequence n => Json.mkObj [("_tag", "AfterSequence"), ("sequence", seq n)]
+
+def policy : Policy → Json
+  | .terminateOnLag n => Json.mkObj [("_tag", "TerminateOnLag"), ("messages", toJson n)]
+
+def consumeOptions (o : ConsumeOptions) : Json :=
+  Json.mkObj
+    [ ("filters", Json.arr (o.filters.map Json.str).toArray)
+    , ("start", startPosition o.start)
+    , ("buffer", policy o.buffer) ]
+
+/-- The seam's error classes and field names (`src/internal/JetStream.ts:88-90`,
+`:130-133`): `lastDeliveredSequence` is the model's `lastDelivered`. -/
+def subError : SubError → Json
+  | .streamNotFound stream => Json.mkObj [("_tag", "StreamNotFound"), ("stream", Json.str stream)]
+  | .consumerLagged stream lastDelivered =>
+    Json.mkObj
+      [ ("_tag", "ConsumerLagged")
+      , ("stream", Json.str stream)
+      , ("lastDeliveredSequence", seq lastDelivered) ]
+
+/-- A consumer-visible event with its full message. -/
+def observed : Observed → Json
+  | .entry m => Json.mkObj [("_tag", "Entry"), ("message", message m)]
+  | .caughtUp => Json.mkObj [("_tag", "CaughtUp")]
+  | .failed e => Json.mkObj [("_tag", "Failed"), ("error", subError e)]
+
+/-- The same event reduced to what a free-running history compares: the
+sequence of an entry, the tag of `CaughtUp`, the error of a failure. -/
+def observedSummary : Observed → Json
+  | .entry m => Json.mkObj [("_tag", "Entry"), ("sequence", seq m.sequence)]
+  | .caughtUp => Json.mkObj [("_tag", "CaughtUp")]
+  | .failed e => Json.mkObj [("_tag", "Failed"), ("error", subError e)]
+
+def events (es : List Observed) : Json := Json.arr (es.map observed).toArray
+
+def counts (cs : List (StreamName × Nat)) : Json :=
+  Json.arr (cs.map (fun p => Json.arr #[Json.str p.1, toJson p.2])).toArray
+
+def subStep (t : SubTraceStep) : Json :=
+  let fields : List (String × Json) :=
+    match t.label with
+    | .op o e => [("label", "op"), ("op", op o), ("expect", expect e)]
+    | .register stream opts l₀ id e =>
+      [ ("label", "register"), ("stream", Json.str stream), ("options", consumeOptions opts)
+      , ("lastEnqueued", seq l₀), ("id", toJson id), ("expect", expect e)
+      , ("events", events t.events) ]
+    | .pull id => [("label", "pull"), ("id", toJson id), ("events", events t.events)]
+    | .unsubscribe id => [("label", "unsubscribe"), ("id", toJson id)]
+  Json.mkObj (fields ++ [("counts", counts t.counts)])
+
+def history (h : History) : Json :=
+  Json.arr (h.map (fun chunk => Json.arr (chunk.map observedSummary).toArray)).toArray
+
+def subTrace (t : SubTrace) : Json :=
+  Json.mkObj
+    [ ("name", Json.str t.name)
+    , ("mirrors", Json.arr (t.mirrors.map Json.str).toArray)
+    , ("kind", "subscriber")
+    , ("steps", Json.arr (t.steps.map subStep).toArray)
+    , ("finalObserved", Json.arr (t.finalObserved.map (fun p =>
+        Json.mkObj [("id", toJson p.1), ("events", events p.2)])).toArray)
+    , ("freeRunning", Json.mkObj
+        [ ("outcomes", Json.mkObj ((subIds t).map (fun id =>
+            (toString id, Json.arr ((placementsOf t id).map history).toArray)))) ]) ]
+
+def subFixture (foldableCommit : Option String) : Json :=
+  Json.mkObj
+    [ ("schema", toJson (2 : Nat))
+    , ("producer", "EffectNatsSubstrate")
+    , ("snapshot", "r3.1")
+    , ("pin", "872bd7f")
+    , ("foldableCommit", match foldableCommit with | some c => Json.str c | none => Json.null)
+    , ("compare", Json.mkObj [("ignore", Json.arr #[Json.str "timestampMillis"])])
+    , ("traces", Json.arr (allSubTraces.map subTrace).toArray) ]
+
 end Export
+
+structure Args where
+  subscriber : Bool := false
+  foldableCommit : Option String := none
+
+def parseArgs : List String → Option Args
+  | [] => some {}
+  | "--subscriber" :: rest => (parseArgs rest).map (fun a => { a with subscriber := true })
+  | "--foldable-commit" :: c :: rest =>
+    (parseArgs rest).map (fun a => { a with foldableCommit := some c })
+  | _ => none
 
 def main (rawArgs : List String) : IO UInt32 := do
   -- `lake exe effect_nats_traces -- …` forwards the `--` separator; accept both forms.
   let args := match rawArgs with
     | "--" :: rest => rest
     | rest => rest
-  let commit := match args with
-    | ["--foldable-commit", c] => some c
-    | _ => none
-  if args ≠ [] && commit.isNone then
-    IO.eprintln "usage: effect_nats_traces [--foldable-commit <hash>]"
+  match parseArgs args with
+  | none =>
+    IO.eprintln "usage: effect_nats_traces [--subscriber] [--foldable-commit <hash>]"
     return 2
-  IO.println (Export.fixture commit).pretty
-  return 0
+  | some a =>
+    IO.println (if a.subscriber then (Export.subFixture a.foldableCommit).pretty
+                else (Export.fixture a.foldableCommit).pretty)
+    return 0
