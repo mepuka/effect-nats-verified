@@ -21,10 +21,13 @@ Conventions shared with the harness (§14): an `unsubscribe` of a subscriber
 that has already finished is a no-op, not a disabled step; the other labels run
 through `apply` only — `events` and `counts` are placement-specific.
 
-Assumption named in §14 (a theorem candidate for the next snapshot revision):
-enumerating one subscriber's pulls with every other label fixed is sound
+Assumption named in §14 — the acceptance sets are per-subscriber sets conditional
+on it: enumerating one subscriber's pulls with every other label fixed is sound
 because no transition reads another subscriber's state and no label's
-enabledness does (`Next.lean`).
+enabledness does (`Next.lean`). Discharged in stage B1 by the abstract
+independence lemmas of `SimProof` (r4 packet P4a) and the runtime commutation
+(`RtCommute`, SB2); until then a theorem about joint executions must not be
+read off marginal membership (r3.1 review F2).
 
 Everything here is computed by structural recursion so the kernel can evaluate
 it (`decide`); the exporter prints `placementsOf` as `freeRunning.outcomes`.

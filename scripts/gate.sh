@@ -12,8 +12,11 @@ if grep -rn "sorry\|native_decide\|axiom\|unsafe\|set_option" EffectNatsSubstrat
   exit 1
 fi
 
-# 3. Every public theorem rests on at most propext, Classical.choice, Quot.sound.
+# 3. Axioms: the frozen public surface, named one by one (Axioms.lean), and every theorem
+#    constant in the EffectNatsSubstrate namespace, enumerated from the environment (AxiomsAll.lean)
+#    — at most propext, Classical.choice, Quot.sound.
 lake env lean scripts/Axioms.lean
+lake env lean scripts/AxiomsAll.lean
 
 # 4. The exporter is deterministic: two runs, same bytes (Foldable law 4).
 COMMIT="$(git rev-parse HEAD)"
