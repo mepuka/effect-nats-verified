@@ -61,6 +61,14 @@ document, never the other way around.
   (boundary validation the model performs and the interpreter does not) carries
   `replay := false`; nothing else is ever hidden from the fixture. `Main.lean` is the only
   module that may import `Lean`; the library stays on `Init`.
+- **Modeling and proofs go through the Lean systems suite.** Every slice document, representation
+  decision, signature freeze, proof body, and assurance review is produced by invoking the suite
+  in catalogue order — `lean-formalization-strategy` (Pass A before a slice document; Pass B to
+  freeze), `lean-model-invariants`, `lean-algebraic-systems`, `lean-llm-proof-loop`,
+  `lean-assurance-review`. The suite is installed in Foldable at `.agents/skills/lean-*` and
+  `.claude/skills/lean-*`; its editable source and catalogue are `../effect-nats/skills/`
+  (`CATALOG.md`). The rule covers reasoning *about* the model — a review, a brief, a refinement
+  claim — not only edits to it.
 
 ## Gate
 
