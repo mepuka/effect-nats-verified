@@ -233,8 +233,9 @@ over `rls`, `labels`, `owed` and derive the frozen one; the frozen statement is 
 (a valid label sequence of the trace's serial with `id`'s pulls inserted, at most two
 consecutively, is enumerated by `outcomesFrom`). **Required, not optional:** the "at most two returning pulls
 per abstract gap" bound that `pullsAtGap`'s fuel encodes (`SubPlacements.lean`) is proved as a
-named lemma (`pullStep` returns `none` on an empty pending list after at most one `caughtUp` —
-cite the lines) before `a4_complete` uses it; an enumeration probe is not acceptance evidence
+named lemma (each returning pull either empties `pending` or moves `done` to `shutDown`, and
+`pullStep` is `none` on an empty open buffer or a shut-down subscriber — `Next.lean:75-87` — so a
+third consecutive pull of one subscriber never returns) before `a4_complete` uses it; an enumeration probe is not acceptance evidence
 (overwatch Q12, disposed 2026-08-23).
 
 ## 4. Gate
