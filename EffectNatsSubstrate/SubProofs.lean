@@ -123,13 +123,6 @@ theorem selectReplay_pairwise {messages : List StoredMessage} {opts : ConsumeOpt
     (selectReplay messages opts).Pairwise (fun a b => a.sequence < b.sequence) :=
   List.Pairwise.sublist (selectReplay_sublist messages opts) h
 
-theorem entrySequences_visible_newSubscriber (stream : StreamName) (opts : ConsumeOptions)
-    (l₀ : StreamSeq) (messages : List StoredMessage) :
-    entrySequences (visible (newSubscriber stream opts l₀ messages))
-      = (selectReplay messages opts).map (·.sequence) := by
-  simp [visible, newSubscriber, replayObserved, entrySequences_append, entrySequences_map_entry,
-    entrySequences_caughtUp]
-
 /-! ## Preservation of `SubInv` under `register`, `pull`, `unsubscribe` -/
 
 theorem newSubscriber_inv {s : SubState} {stream : StreamName} {opts : ConsumeOptions}
@@ -176,8 +169,7 @@ theorem pullStep_inv {s : SubState} {sub sub' : Subscriber} (hinv : SubInv s sub
       registered_false_of_status hinv (by rw [hst]; intro h'; cases h')
     have hvis : entrySequences (visible { sub with observed := sub.observed ++ [.failed e],
                                                    status := .shutDown })
-        = entrySequences (visible sub) := by
-      simp [visible, hpend, entrySequences_append, entrySequences_failed]
+        = entrySequences (visible sub) := entrySequences_visible_fail sub e
     constructor
     · exact hinv.capacityPos
     · exact hinv.capacity
@@ -197,8 +189,7 @@ theorem pullStep_inv {s : SubState} {sub sub' : Subscriber} (hinv : SubInv s sub
       cases h
       have hvis : entrySequences (visible { sub with observed := sub.observed ++ sub.pending.map Observed.entry,
                                                      pending := [] })
-          = entrySequences (visible sub) := by
-        simp [visible]
+          = entrySequences (visible sub) := congrArg entrySequences (visible_drain sub)
       constructor
       · exact hinv.capacityPos
       · exact Nat.zero_le _
@@ -220,8 +211,8 @@ theorem pullStep_inv {s : SubState} {sub sub' : Subscriber} (hinv : SubInv s sub
         registered_false_of_status hinv (by rw [hst]; intro h'; cases h')
       have hvis : entrySequences (visible { sub with observed := sub.observed ++ sub.pending.map Observed.entry,
                                                      pending := [], status := .done e })
-          = entrySequences (visible sub) := by
-        simp [visible]
+          = entrySequences (visible sub) :=
+        congrArg entrySequences (visible_drain_done sub e)
       constructor
       · exact hinv.capacityPos
       · exact Nat.zero_le _

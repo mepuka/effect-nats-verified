@@ -215,6 +215,23 @@ theorem entrySequences_visible_admit (sub : Subscriber) (m : StoredMessage) :
   simp [visible, entrySequences_append, entrySequences_map_entry, entrySequences_entry_singleton,
     List.map_append]
 
+/-- A recorded failure adds no entry sequence, whatever is still buffered. -/
+theorem entrySequences_visible_fail (sub : Subscriber) (e : SubError) :
+    entrySequences (visible { sub with observed := sub.observed ++ [Observed.failed e],
+                                       status := .shutDown })
+      = entrySequences (visible sub) := by
+  simp only [visible]
+  rw [entrySequences_append, entrySequences_append, entrySequences_failed, List.append_nil,
+    entrySequences_append]
+
+/-- Registration's visible sequences are exactly the replay, without the `caughtUp` marker. -/
+theorem entrySequences_visible_newSubscriber (stream : StreamName) (opts : ConsumeOptions)
+    (l₀ : StreamSeq) (messages : List StoredMessage) :
+    entrySequences (visible (newSubscriber stream opts l₀ messages))
+      = (selectReplay messages opts).map (·.sequence) := by
+  simp [visible, newSubscriber, replayObserved, entrySequences_append, entrySequences_map_entry,
+    entrySequences_caughtUp]
+
 theorem visible_admit (sub : Subscriber) (m : StoredMessage) :
     visible { sub with pending := sub.pending ++ [m], lastEnqueued := m.sequence }
       = visible sub ++ [Observed.entry m] := by
