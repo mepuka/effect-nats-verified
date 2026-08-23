@@ -212,27 +212,6 @@ theorem lastMsgStep_ok_eq {s s' : JSState} {stream : StreamName} {subject : Subj
     · cases h; rfl
     · cases h
 
-theorem mem_updateSub_eq :
-    ∀ {subs : List (SubId × Subscriber)} {id : SubId} {f : Subscriber → Subscriber}
-      {p : SubId × Subscriber},
-      p ∈ updateSub subs id f → p ∈ subs ∨ (p.1 = id ∧ ∃ sub, (id, sub) ∈ subs ∧ p.2 = f sub)
-  | [], _, _, _, h => by cases h
-  | (i, sub) :: rest, id, f, p, h => by
-    by_cases hi : i = id
-    · subst hi
-      simp only [updateSub] at h
-      rcases List.mem_cons.mp h with rfl | h
-      · exact Or.inr ⟨rfl, sub, List.mem_cons_self, rfl⟩
-      · rcases mem_updateSub_eq h with h1 | ⟨hp1, sub', h1, h2⟩
-        · exact Or.inl (List.mem_cons_of_mem _ h1)
-        · exact Or.inr ⟨hp1, sub', List.mem_cons_of_mem _ h1, h2⟩
-    · simp only [updateSub, if_neg hi] at h
-      rcases List.mem_cons.mp h with rfl | h
-      · exact Or.inl List.mem_cons_self
-      · rcases mem_updateSub_eq h with h1 | ⟨hp1, sub', h1, h2⟩
-        · exact Or.inl (List.mem_cons_of_mem _ h1)
-        · exact Or.inr ⟨hp1, sub', List.mem_cons_of_mem _ h1, h2⟩
-
 /-! ## The ledger invariant -/
 
 /-- Every stored message is in the ledger; every ledger record is for an assigned id;

@@ -25,26 +25,36 @@ theorem mem_of_lookupSub :
     · simp only [lookupSub, if_neg hi] at h
       exact List.mem_cons_of_mem _ (mem_of_lookupSub h)
 
-theorem mem_updateSub :
+theorem mem_updateSub_eq :
     ∀ {subs : List (SubId × Subscriber)} {id : SubId} {f : Subscriber → Subscriber}
       {p : SubId × Subscriber},
-      p ∈ updateSub subs id f → p ∈ subs ∨ ∃ sub, (p.1, sub) ∈ subs ∧ p.2 = f sub
+      p ∈ updateSub subs id f → p ∈ subs ∨ (p.1 = id ∧ ∃ sub, (id, sub) ∈ subs ∧ p.2 = f sub)
   | [], _, _, _, h => by cases h
   | (i, sub) :: rest, id, f, p, h => by
     by_cases hi : i = id
     · subst hi
       simp only [updateSub] at h
       rcases List.mem_cons.mp h with rfl | h
-      · exact Or.inr ⟨sub, List.mem_cons_self, rfl⟩
-      · rcases mem_updateSub h with h1 | ⟨sub', h1, h2⟩
+      · exact Or.inr ⟨rfl, sub, List.mem_cons_self, rfl⟩
+      · rcases mem_updateSub_eq h with h1 | ⟨hp1, sub', h1, h2⟩
         · exact Or.inl (List.mem_cons_of_mem _ h1)
-        · exact Or.inr ⟨sub', List.mem_cons_of_mem _ h1, h2⟩
+        · exact Or.inr ⟨hp1, sub', List.mem_cons_of_mem _ h1, h2⟩
     · simp only [updateSub, if_neg hi] at h
       rcases List.mem_cons.mp h with rfl | h
       · exact Or.inl List.mem_cons_self
-      · rcases mem_updateSub h with h1 | ⟨sub', h1, h2⟩
+      · rcases mem_updateSub_eq h with h1 | ⟨hp1, sub', h1, h2⟩
         · exact Or.inl (List.mem_cons_of_mem _ h1)
-        · exact Or.inr ⟨sub', List.mem_cons_of_mem _ h1, h2⟩
+        · exact Or.inr ⟨hp1, sub', List.mem_cons_of_mem _ h1, h2⟩
+
+theorem mem_updateSub :
+    ∀ {subs : List (SubId × Subscriber)} {id : SubId} {f : Subscriber → Subscriber}
+      {p : SubId × Subscriber},
+      p ∈ updateSub subs id f → p ∈ subs ∨ ∃ sub, (p.1, sub) ∈ subs ∧ p.2 = f sub := by
+  intro subs id f p h
+  rcases mem_updateSub_eq h with h1 | ⟨hp1, sub, h1, h2⟩
+  · exact Or.inl h1
+  · subst hp1
+    exact Or.inr ⟨sub, h1, h2⟩
 
 /-! ## The enabling condition of `register` -/
 
