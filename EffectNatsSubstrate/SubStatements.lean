@@ -546,22 +546,19 @@ theorem lagged_carries_last_observed {s : SubState} (h : ReachableSub s) :
       (entrySequences p.2.observed).getLast? = some n :=
   fun p hp stream n hlast => (lagState_reachable h p hp).failedLag stream n hlast
 
-theorem lagged_iff {s : SubState} {stream : StreamName} {subject : SubjectName}
+/-- Explicit-premise form of the lag decision: it rests on exactly two facts about the
+pre-state subscriber — it is `opened`, and its buffer fits the policy bound. The stage-B
+bridge re-establishes these from the runtime model rather than from `ReachableSub`. -/
+theorem lagged_iff_of_open {s : SubState} {stream : StreamName} {subject : SubjectName}
     {payload : PayloadHash} {headers : List (String × String)} {x : Option StreamSeq} {now : Nat}
     {seq : StreamSeq} {s' : SubState} {id : SubId} {sub sub' : Subscriber} {n : Nat}
-    (hreach : ReachableSub s)
     (h : apply s (.op (.publish stream subject payload headers x now) (.ok (.sequence seq))) = some s')
     (hb : lookupSub s.subs id = some sub) (ha : lookupSub s'.subs id = some sub')
     (hp : sub.policy = .terminateOnLag n) (hr : sub.registered = true) (hs : sub.stream = stream)
-    (hm : matchesAny sub.filters subject = true) :
+    (hm : matchesAny sub.filters subject = true)
+    (ho : sub.status = .opened) (hcap : sub.pending.length ≤ n) :
     (sub'.status = .closing (.consumerLagged stream sub.lastEnqueued) ∨
      sub'.status = .done (.consumerLagged stream sub.lastEnqueued)) ↔ sub.pending.length = n := by
-  have hinv : SubInv s sub := stateInv_reachable hreach _ (mem_of_lookupSub hb)
-  have ho : sub.status = .opened := hinv.registeredOpen hr
-  have hcap : sub.pending.length ≤ n := by
-    have hc := hinv.capacity
-    rw [hp] at hc
-    simpa [Policy.capacity] using hc
   obtain rfl := publish_sub h hb ha
   have hcond : (sub.stream == stream && sub.registered && matchesAny sub.filters
       (publishedMessage subject seq payload headers now).subject) = true := by
@@ -588,6 +585,22 @@ theorem lagged_iff {s : SubState} {stream : StreamName} {subject : SubjectName}
         cases h1'
     · intro heq
       exact absurd (Nat.le_of_eq heq.symm) hfull
+
+theorem lagged_iff {s : SubState} {stream : StreamName} {subject : SubjectName}
+    {payload : PayloadHash} {headers : List (String × String)} {x : Option StreamSeq} {now : Nat}
+    {seq : StreamSeq} {s' : SubState} {id : SubId} {sub sub' : Subscriber} {n : Nat}
+    (hreach : ReachableSub s)
+    (h : apply s (.op (.publish stream subject payload headers x now) (.ok (.sequence seq))) = some s')
+    (hb : lookupSub s.subs id = some sub) (ha : lookupSub s'.subs id = some sub')
+    (hp : sub.policy = .terminateOnLag n) (hr : sub.registered = true) (hs : sub.stream = stream)
+    (hm : matchesAny sub.filters subject = true) :
+    (sub'.status = .closing (.consumerLagged stream sub.lastEnqueued) ∨
+     sub'.status = .done (.consumerLagged stream sub.lastEnqueued)) ↔ sub.pending.length = n := by
+  have hinv : SubInv s sub := stateInv_reachable hreach _ (mem_of_lookupSub hb)
+  exact lagged_iff_of_open h hb ha hp hr hs hm (hinv.registeredOpen hr) (by
+    have hc := hinv.capacity
+    rw [hp] at hc
+    simpa [Policy.capacity] using hc)
 
 /-! ## The negative witnesses (slice document §7) -/
 
