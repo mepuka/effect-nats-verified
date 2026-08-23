@@ -271,7 +271,7 @@ theorem SubInv.of_lookups {s s' : SubState} {sub : Subscriber} (hinv : SubInv s 
     (hcore : ∀ n st₀, lookupStream s.core n = some st₀ →
       ∃ st₁, lookupStream s'.core n = some st₁ ∧ st₀.nextSequence ≤ st₁.nextSequence) :
     SubInv s' sub :=
-  hinv.of_stream_lookup fun _ st₀ hl => hcore _ _ hl
+  hinv.of_stream_lookup fun _ _ hl => hcore _ _ hl
 
 /-! ## Preservation under fan-out and deletion -/
 
