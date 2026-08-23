@@ -3417,4 +3417,308 @@ theorem rel_step_resolve {s s' : RtState} {id : SubId} (hinv : RtInv s)
                   end_corr hro (by rw [← hk]; exact htgt) hcaPre⟩
 
 
+/-! ## One runtime step, whatever the label -/
+
+theorem rel_step {s s' : RtState} {l : RtLabel} (hinv : RtInv s)
+    (hstep : rtStep s l = some s') {labels owed : List Label}
+    (hrel : Rel s labels owed) (hhist : RelHist s labels owed) :
+    RelStep s' labels owed (rtSerial [l]) l := by
+  cases l with
+  | op o e => exact rel_step_op hinv hstep hrel hhist
+  | register stream opts l₀ id e => exact rel_step_register hinv hstep hrel hhist
+  | check id => exact rel_step_check hinv hstep hrel hhist
+  | resolve id => exact rel_step_resolve hinv hstep hrel hhist
+  | endFanOut => exact rel_step_endFanOut hinv hstep hrel hhist
+  | pull id => exact rel_step_pull hinv hstep hrel hhist
+  | wake id => exact rel_step_wake hinv hstep hrel hhist
+  | closeA id => exact rel_step_closeA hinv hstep hrel hhist
+  | closeB id => exact rel_step_closeB hinv hstep hrel hhist
+
+/-! ## Runtime executions -/
+
+theorem rtSerial_append : ∀ (l₁ l₂ : List RtLabel),
+    rtSerial (l₁ ++ l₂) = rtSerial l₁ ++ rtSerial l₂ := by
+  intro l₁
+  induction l₁ with
+  | nil => intro l₂; rfl
+  | cons l rest ih =>
+    intro l₂
+    cases l with
+    | op o e =>
+      show _ :: rtSerial (rest ++ l₂) = _ :: (rtSerial rest ++ rtSerial l₂)
+      rw [ih]
+    | register stream opts l₀ id e =>
+      show _ :: rtSerial (rest ++ l₂) = _ :: (rtSerial rest ++ rtSerial l₂)
+      rw [ih]
+    | check id => exact ih l₂
+    | resolve id => exact ih l₂
+    | endFanOut => exact ih l₂
+    | pull id => exact ih l₂
+    | wake id => exact ih l₂
+    | closeA id => exact ih l₂
+    | closeB id => exact ih l₂
+
+theorem runRtSteps_cons (s : RtState) (l : RtLabel) (rls : List RtLabel) :
+    runRtSteps s (l :: rls) =
+      match rtStep s l with | some s' => runRtSteps s' rls | none => none := rfl
+
+theorem runRtSteps_append : ∀ (l₁ : List RtLabel) {s t : RtState} (l₂ : List RtLabel),
+    runRtSteps s l₁ = some t → runRtSteps s (l₁ ++ l₂) = runRtSteps t l₂ := by
+  intro l₁
+  induction l₁ with
+  | nil => intro s t l₂ h; cases h; rfl
+  | cons l rest ih =>
+    intro s t l₂ h
+    rw [runRtSteps_cons] at h
+    cases hst : rtStep s l with
+    | none => rw [hst] at h; cases h
+    | some u =>
+      rw [hst] at h
+      show runRtSteps s (l :: (rest ++ l₂)) = _
+      rw [runRtSteps_cons, hst]
+      exact ih l₂ h
+
+theorem reachableRt_run {s : RtState} (h : ReachableRt s) :
+    ∃ rls, runRtSteps initialRt rls = some s := by
+  induction h with
+  | init => exact ⟨[], rfl⟩
+  | @step u u' l _ hnext ih =>
+    obtain ⟨rls, hrls⟩ := ih
+    refine ⟨rls ++ [l], ?_⟩
+    rw [runRtSteps_append rls [l] hrls, runRtSteps_cons]
+    show (match rtStep u l with | some x => runRtSteps x [] | none => none) = some u'
+    rw [show rtStep u l = some u' from hnext]
+    rfl
+
+theorem reachableRt_step {s s' : RtState} {l : RtLabel} (h : ReachableRt s)
+    (hstep : rtStep s l = some s') : ReachableRt s' := ReachableRt.step h hstep
+
+/-! ## The induction -/
+
+/-- Runtime labels that are not scope closures. -/
+def CloseFree (rls : List RtLabel) : Prop := ∀ l ∈ rls, ∀ j, l ≠ .closeA j
+
+theorem rel_run (hinv : ∀ u, ReachableRt u → RtInv u) :
+    ∀ (rls : List RtLabel) {s s' : RtState} {labels owed : List Label},
+      ReachableRt s → runRtSteps s rls = some s' →
+      Rel s labels owed → RelHist s labels owed →
+      ∃ labels' owed', Rel s' labels' owed' ∧ RelHist s' labels' owed' ∧
+        labelSerial labels' ++ labelSerial owed'
+          = labelSerial labels ++ labelSerial owed ++ rtSerial rls ∧
+        (CloseFree rls → NoUnsub labels → NoUnsub owed →
+          NoUnsub labels' ∧ NoUnsub owed') := by
+  intro rls
+  induction rls with
+  | nil =>
+    intro s s' labels owed _ hrun hrel hhist
+    cases hrun
+    exact ⟨labels, owed, hrel, hhist, (List.append_nil _).symm,
+      fun _ hnl hno => ⟨hnl, hno⟩⟩
+  | cons l rest ih =>
+    intro s s' labels owed hreach hrun hrel hhist
+    rw [runRtSteps_cons] at hrun
+    cases hst : rtStep s l with
+    | none => rw [hst] at hrun; cases hrun
+    | some u =>
+      rw [hst] at hrun
+      obtain ⟨l1, o1, hr1, hh1, hs1, hn1⟩ := rel_step (hinv s hreach) hst hrel hhist
+      obtain ⟨l2, o2, hr2, hh2, hs2, hn2⟩ :=
+        ih (reachableRt_step hreach hst) hrun hr1 hh1
+      refine ⟨l2, o2, hr2, hh2, ?_, ?_⟩
+      · rw [hs2, hs1]
+        show _ = labelSerial labels ++ labelSerial owed ++ rtSerial ([l] ++ rest)
+        rw [rtSerial_append, List.append_assoc]
+      · intro hcf hnl hno
+        obtain ⟨a, b⟩ := hn1 (fun j => hcf l (List.Mem.head _) j) hnl hno
+        exact hn2 (fun m hm => hcf m (List.Mem.tail _ hm)) a b
+
+/-! ## The relation holds at the start -/
+
+theorem rel_initial : Rel initialRt [] [] ∧ RelHist initialRt [] [] := by
+  refine ⟨⟨initialSub, rfl, rfl, rfl, fun _ => ⟨rfl, rfl, ?_⟩, fun f hf => by cases hf⟩,
+    fun id hsome => ?_⟩
+  · intro id r hlkr
+    cases hlkr
+  · cases hsome
+
+/-! ## Subscriber counts -/
+
+theorem filter_length_cons {a : Type} (P : a → Bool) (x y : a) (l1 l2 : List a)
+    (h : P x = P y) (hl : (l1.filter P).length = (l2.filter P).length) :
+    ((x :: l1).filter P).length = ((y :: l2).filter P).length := by
+  rw [List.filter_cons, List.filter_cons, h]
+  by_cases hq : P y = true
+  · rw [if_pos hq, if_pos hq, List.length_cons, List.length_cons, hl]
+  · rw [if_neg hq, if_neg hq]
+    exact hl
+
+theorem subscriberCount_corr : ∀ (rs : List (SubId × RtSubscriber))
+    (as : List (SubId × Subscriber)),
+    as.map Prod.fst = rs.map Prod.fst → (rs.map Prod.fst).Pairwise (· < ·) →
+    (∀ id r, lookupRt rs id = some r → (r.closeStarted = true ∨ r.queue.status = .shutDown) →
+      r.registered = false) →
+    (∀ id r, lookupRt rs id = some r → ∃ a, lookupSub as id = some a ∧ corrSub r a) →
+    ∀ stream, (as.filter (fun p => p.2.registered && p.2.stream == stream)).length =
+      ((rs.map (fun p => (p.1, p.2.erase))).filter
+        (fun p => p.2.registered && p.2.stream == stream)).length := by
+  intro rs
+  induction rs with
+  | nil =>
+    intro as hkeys _ _ _ stream
+    cases as with
+    | nil => rfl
+    | cons q qs => simp at hkeys
+  | cons p rest ih =>
+    obtain ⟨i, r⟩ := p
+    intro as hkeys hnd hreg hcorr stream
+    cases as with
+    | nil => simp at hkeys
+    | cons q qs =>
+      obtain ⟨j, a⟩ := q
+      simp only [List.map_cons, List.cons.injEq] at hkeys
+      obtain ⟨hij, htl⟩ := hkeys
+      subst hij
+      have hlkhead : lookupRt ((j, r) :: rest) j = some r := by simp [lookupRt]
+      obtain ⟨b, hb, hcb⟩ := hcorr j r hlkhead
+      have hba : b = a := by
+        have hqa : lookupSub ((j, a) :: qs) j = some a := by simp [lookupSub]
+        exact Option.some.inj (hb.symm.trans hqa)
+      subst hba
+      rw [List.map_cons, List.pairwise_cons] at hnd
+      obtain ⟨hlt, hndrest⟩ := hnd
+      have hne : ∀ id, id ∈ rest.map Prod.fst → ¬ (j = id) := by
+        intro id hmem he
+        have hlt2 := hlt id hmem
+        rw [he] at hlt2
+        exact Nat.lt_irrefl _ hlt2
+      have hrest : ∀ id r₀, lookupRt rest id = some r₀ →
+          lookupRt ((j, r) :: rest) id = some r₀ := by
+        intro id r₀ h
+        have hmem : id ∈ rest.map Prod.fst :=
+          List.mem_map.mpr ⟨(id, r₀), mem_of_lookupRt rest id r₀ h, rfl⟩
+        simp only [lookupRt, if_neg (hne id hmem)]
+        exact h
+      have hpred : (b.registered && b.stream == stream) =
+          (r.erase.registered && r.erase.stream == stream) := by
+        by_cases hcl : Closed r
+        · obtain ⟨-, hbreg, -⟩ := hcb.1 hcl
+          have hrreg : r.registered = false := hreg j r hlkhead hcl
+          rw [hbreg]
+          show false = (r.registered && _)
+          rw [hrreg]
+          rfl
+        · rw [hcb.2 hcl]
+      have hih := ih qs htl hndrest
+        (fun id r₀ h => hreg id r₀ (hrest id r₀ h))
+        (fun id r₀ h => by
+          obtain ⟨c, hc, hcc⟩ := hcorr id r₀ (hrest id r₀ h)
+          have hmem : id ∈ rest.map Prod.fst :=
+            List.mem_map.mpr ⟨(id, r₀), mem_of_lookupRt rest id r₀ h, rfl⟩
+          rw [show lookupSub ((j, b) :: qs) id = lookupSub qs id by
+            simp only [lookupSub, if_neg (hne id hmem)]] at hc
+          exact ⟨c, hc, hcc⟩)
+        stream
+      exact filter_length_cons (fun p => p.2.registered && p.2.stream == stream)
+        (j, b) (j, r.erase) qs (rest.map (fun p => (p.1, p.2.erase))) hpred hih
+
+
+theorem reachableRt_of_run : ∀ (rls : List RtLabel) {s t : RtState},
+    ReachableRt s → runRtSteps s rls = some t → ReachableRt t := by
+  intro rls
+  induction rls with
+  | nil => intro s t h hrun; cases hrun; exact h
+  | cons l rest ih =>
+    intro s t h hrun
+    rw [runRtSteps_cons] at hrun
+    cases hst : rtStep s l with
+    | none => rw [hst] at hrun; cases hrun
+    | some u =>
+      rw [hst] at hrun
+      exact ih (reachableRt_step h hst) hrun
+
+/-- The witness of `A4Inclusion`, read off the relation at a quiescent runtime state, together
+with the P5c export: when the runtime execution has no scope closures the witness has no
+`unsubscribe` label. -/
+theorem a4_witness (hinv : ∀ u, ReachableRt u → RtInv u)
+    (rls : List RtLabel) (s : RtState) (hrun : runRtSteps initialRt rls = some s)
+    (hfan : s.fanOut = none) :
+    ∃ labels sA, runLabels initialSub labels = some sA ∧
+      labelSerial labels = rtSerial rls ∧
+      (∀ id, (lookupRt s.subs id).isSome = true →
+        abstractHistory labels id = some (rtHistory s id)) ∧
+      (∀ stream, subscriberCount sA stream = subscriberCount (eraseRt s) stream) ∧
+      (CloseFree rls → NoUnsub labels) := by
+  obtain ⟨labels, owed, hrel, hhist, hser, hnu⟩ :=
+    rel_run hinv rls ReachableRt.init hrun rel_initial.1 rel_initial.2
+  obtain ⟨sA, hrunA, hnext, hkeys, hquiet, -⟩ := hrel
+  obtain ⟨howed, hcoreA, hcorr⟩ := hquiet hfan
+  subst howed
+  have hreach : ReachableRt s := reachableRt_of_run rls ReachableRt.init hrun
+  have hinvS : RtInv s := hinv s hreach
+  refine ⟨labels, sA, hrunA, ?_, ?_, ?_, ?_⟩
+  · rw [show labelSerial ([] : List Label) = [] from rfl] at hser
+    simpa using hser
+  · intro id hsome
+    exact (hhist id hsome).1 hfan
+  · intro stream
+    show (sA.subs.filter (fun p => p.2.registered && p.2.stream == stream)).length =
+      ((s.subs.map (fun p => (p.1, p.2.erase))).filter
+        (fun p => p.2.registered && p.2.stream == stream)).length
+    refine subscriberCount_corr s.subs sA.subs hkeys hinvS.shape.1 ?_ hcorr stream
+    intro id r hlkr hcl
+    have hsub := rtSubInv_of_lookup hinvS hlkr
+    cases hb : r.registered with
+    | false => rfl
+    | true => exact absurd hcl (not_closed_of_registered hsub hb)
+  · intro hcf
+    exact (hnu hcf (fun l hl => by cases hl) (fun l hl => by cases hl)).1
+
+/-- **`A4Inclusion` modulo the invariant** (packet P4b; the one remaining input is P2's
+`rtInv_reachable`). -/
+theorem a4_inclusion_of_rtInv
+    (hinv : ∀ (rls : List RtLabel) (s : RtState), runRtSteps initialRt rls = some s → RtInv s) :
+    A4Inclusion := by
+  intro rls s hrun hfan
+  obtain ⟨labels, sA, h1, h2, h3, h4, -⟩ :=
+    a4_witness (fun u hu => by
+      obtain ⟨rls2, hr2⟩ := reachableRt_run hu
+      exact hinv rls2 u hr2) rls s hrun hfan
+  exact ⟨labels, sA, h1, h2, h3, h4⟩
+
+/-- **The P5c export** (proof map §3 P5, overwatch round 5 §14c): for a runtime execution without
+scope closures the witness of `A4Inclusion` contains only `.op`, `.register` and `.pull` labels —
+no `unsubscribe`. This is the only extra fact `a4_complete` needs from P4b. -/
+theorem a4_inclusion_pullOnly_of_rtInv
+    (hinv : ∀ (rls : List RtLabel) (s : RtState), runRtSteps initialRt rls = some s → RtInv s) :
+    ∀ (rls : List RtLabel) (s : RtState),
+      runRtSteps initialRt rls = some s → s.fanOut = none →
+      rls.all (fun l => match l with
+        | .closeA _ => false | .closeB _ => false | _ => true) = true →
+      ∃ labels sA, runLabels initialSub labels = some sA ∧
+        labelSerial labels = rtSerial rls ∧
+        (∀ id, (lookupRt s.subs id).isSome = true →
+          abstractHistory labels id = some (rtHistory s id)) ∧
+        (∀ stream, subscriberCount sA stream = subscriberCount (eraseRt s) stream) ∧
+        labels.all (fun l => match l with | .unsubscribe _ => false | _ => true) = true := by
+  intro rls s hrun hfan hclose
+  obtain ⟨labels, sA, h1, h2, h3, h4, h5⟩ :=
+    a4_witness (fun u hu => by
+      obtain ⟨rls2, hr2⟩ := reachableRt_run hu
+      exact hinv rls2 u hr2) rls s hrun hfan
+  refine ⟨labels, sA, h1, h2, h3, h4, ?_⟩
+  have hcf : CloseFree rls := by
+    intro l hl j he
+    have := (List.all_eq_true.mp hclose) l hl
+    rw [he] at this
+    exact Bool.noConfusion this
+  have hnu := h5 hcf
+  refine List.all_eq_true.mpr ?_
+  intro l hl
+  cases l with
+  | op _ _ => rfl
+  | register _ _ _ _ _ => rfl
+  | pull _ => rfl
+  | unsubscribe j => exact absurd rfl (hnu _ hl j)
+
+
 end EffectNatsSubstrate
