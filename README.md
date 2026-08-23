@@ -123,6 +123,8 @@ EffectNatsSubstrate/
   RtTraces.lean      the stage-B1 scenarios, checked by decide
   Sim.lean           the stage-B1 statements: A4Inclusion, A4Complete
   EffectQueueLaws.lean the queue laws Q1–Q3 as theorems (SB1)
+  RtReachable.lean   the runtime invariant over reachable states, with the auxiliary fan-out
+                     invariant the induction carries (stage-B1 P2)
   SimRelation.lean   the relation behind a4_inclusion: linearization points, corrSub, Rel, RelHist
   SimProof.lean      the simulation: per-label preservation of the relation, the induction,
                      and a4_inclusion_of_rtInv (stage-B1 P4b)

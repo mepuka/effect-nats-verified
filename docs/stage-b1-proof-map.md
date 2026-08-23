@@ -38,7 +38,7 @@ still owes — and paying it at the end of the fan-out.
 | `RtTraces.lean` | `RtTrace`, `runRtSteps`, `finalRt`, `runRtTrace`, `runLabels`, the four scenarios, `allRtTraces` | kernel witnesses (proved) |
 | `Sim.lean` | `rtSerial`, `labelSerial`, `abstractHistoryFrom`, `abstractHistory`, `A4Inclusion`, `A4Complete` | the statements (frozen) |
 | `EffectQueueLaws.lean` | the nine SB1 theorems (proved 2026-08-23, P1) | queue laws |
-| `RtReachable.lean` (to write) | per-label `RtInv` preservation, `rtInv_reachable`, `core_frame`, `core_reachable`, `pending_le_capacity_rt` | SB3, SB6, SB7 |
+| `RtReachable.lean` | `FanAux`/`RtAux` (the auxiliary invariant the induction carries), per-label `RtInv ∧ RtAux` preservation, `rtInvAux_reachable`, and the frozen `rtInv_reachable`, `core_frame`, `core_reachable`, `pending_le_capacity_rt` (proved 2026-08-23, P2) | SB3, SB6, SB7 |
 | `RtCommute.lean` (to write) | `bindStep`, `commute_consumer_publisher`, `commute_consumers` | SB2 |
 | `SimRelation.lean` | `pointPassed`, `owedOp`, `corrSub`, `corrOn`, `OwedOk`, `Rel`, `RelHist` — the relation as definitions (proof-side; reshapeable) | the target of P4b |
 | `RtList.lean` | `lookupRt_updateRt_self` (the `map` equation), `lookupRt_updateRt_ne`, `updateRt_keys` — the shared toolkit, extracted from `SimProof` at the coordinator's consolidation (2026-08-23); `RtReachable`/`RtCommute`/`SimProof` import it | proof-side |
