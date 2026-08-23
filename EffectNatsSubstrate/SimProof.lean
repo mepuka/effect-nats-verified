@@ -528,4 +528,749 @@ theorem abstractHistoryFrom_congr {k : SubId} : ∀ (ls : List Label) {s t u v :
         rw [← hafter]
         exact hhist
 
+/-! ## The queue under a pending failure -/
+
+theorem fail_of_ne_opened (q : EffectQueue) (e : SubError) (h : q.status ≠ .opened) :
+    q.fail e = q := by
+  unfold EffectQueue.fail
+  cases hs : q.status with
+  | opened => exact absurd hs h
+  | closing _ => rfl
+  | done _ => rfl
+  | shutDown => rfl
+
+theorem fail_buffer (q : EffectQueue) (e : SubError) : (q.fail e).buffer = q.buffer := by
+  unfold EffectQueue.fail
+  cases q.status with
+  | opened => by_cases hb : q.buffer.isEmpty <;> simp [hb]
+  | closing _ => rfl
+  | done _ => rfl
+  | shutDown => rfl
+
+theorem fail_status (q : EffectQueue) (e : SubError) :
+    (q.fail e).status =
+      if q.status = .opened then (if q.buffer.isEmpty then .done e else .closing e)
+      else q.status := by
+  unfold EffectQueue.fail
+  cases hq : q.status with
+  | opened => by_cases hb : q.buffer.isEmpty = true <;> simp [hb]
+  | closing _ => simp [hq]
+  | done _ => simp [hq]
+  | shutDown => simp [hq]
+
+theorem fail_ne_shutDown (q : EffectQueue) (e : SubError) (h : q.status ≠ .shutDown) :
+    (q.fail e).status ≠ .shutDown := by
+  unfold EffectQueue.fail
+  cases hs : q.status with
+  | opened => by_cases hb : q.buffer.isEmpty <;> simp [hb]
+  | closing _ => rw [hs] at h ⊢; exact h
+  | done _ => rw [hs] at h ⊢; exact h
+  | shutDown => exact absurd hs h
+
+theorem failOpt_closeStarted (e? : Option SubError) (r : RtSubscriber) :
+    (failOpt e? r).closeStarted = r.closeStarted := by
+  cases e? <;> rfl
+
+theorem failOpt_chunks (e? : Option SubError) (r : RtSubscriber) :
+    (failOpt e? r).chunks = r.chunks := by
+  cases e? <;> rfl
+
+theorem failOpt_lastEnqueued (e? : Option SubError) (r : RtSubscriber) :
+    (failOpt e? r).lastEnqueued = r.lastEnqueued := by
+  cases e? <;> rfl
+
+theorem failOpt_ne_shutDown {e? : Option SubError} {r : RtSubscriber}
+    (h : r.queue.status ≠ .shutDown) : (failOpt e? r).queue.status ≠ .shutDown := by
+  cases e? with
+  | none => exact h
+  | some e => exact fail_ne_shutDown r.queue e h
+
+theorem not_closed_failOpt {e? : Option SubError} {r : RtSubscriber}
+    (hcs : r.closeStarted = false) (hsd : r.queue.status ≠ .shutDown) :
+    ¬ Closed (failOpt e? r) := by
+  rintro (h | h)
+  · rw [failOpt_closeStarted] at h; rw [h] at hcs; exact Bool.noConfusion hcs
+  · exact failOpt_ne_shutDown hsd h
+
+theorem closed_failOpt_of_closeStarted {e? : Option SubError} {r : RtSubscriber}
+    (hcs : r.closeStarted = true) : Closed (failOpt e? r) :=
+  Or.inl (by rw [failOpt_closeStarted]; exact hcs)
+
+theorem closed_failOpt_of_shutDown {e? : Option SubError} {r : RtSubscriber}
+    (h : r.queue.status = .shutDown) : Closed (failOpt e? r) := by
+  refine Or.inr ?_
+  cases e? with
+  | none => exact h
+  | some e => show (r.queue.fail e).status = .shutDown; rw [fail_of_ne_opened _ _ (by rw [h]; intro hc; exact QueueStatus.noConfusion hc)]; exact h
+
+/-! ## `corrSub` -/
+
+theorem corrSub_of_erase {r : RtSubscriber} {a : Subscriber} (h : ¬ Closed r) (heq : a = r.erase) :
+    corrSub r a := ⟨fun hc => absurd hc h, fun _ => heq⟩
+
+theorem corrSub_of_closed {r : RtSubscriber} {a : Subscriber} (h : Closed r)
+    (h₁ : a.status = .shutDown) (h₂ : a.registered = false) (h₃ : a.observed = r.chunks.flatten) :
+    corrSub r a := ⟨fun _ => ⟨h₁, h₂, h₃⟩, fun hc => absurd h hc⟩
+
+theorem corrSub_observed {r : RtSubscriber} {a : Subscriber} (h : corrSub r a) :
+    a.observed = r.chunks.flatten := by
+  by_cases hc : Closed r
+  · exact (h.1 hc).2.2
+  · rw [h.2 hc]; rfl
+
+/-- The failure a `check` decided depends only on the fan-out and on `lastEnqueued`. -/
+theorem pendingFail_congr (f : FanOut) (id : SubId) {r r' : RtSubscriber}
+    (h : r'.lastEnqueued = r.lastEnqueued) : pendingFail f id r' = pendingFail f id r := by
+  unfold pendingFail
+  rw [h]
+
+theorem pendingOf_eq (f : FanOut) (id : SubId) (r : RtSubscriber) :
+    pendingOf f id r = failOpt (pendingFail f id r) r := rfl
+
+theorem pendingFail_of_decided_none {f : FanOut} (h : f.decided = none) (id : SubId)
+    (r : RtSubscriber) : pendingFail f id r = none := by
+  unfold pendingFail
+  rw [h]
+  cases f.kind <;> rfl
+
+theorem pendingOf_of_decided_none {f : FanOut} (h : f.decided = none) (id : SubId)
+    (r : RtSubscriber) : pendingOf f id r = r := by
+  rw [pendingOf_eq, pendingFail_of_decided_none h]
+  rfl
+
+/-! ## One returning take -/
+
+/-- The three shapes of a `takeAll`/`wake` that returns something: a drain of an open queue, a
+drain of a `closing` queue (which finishes it), and the stored exit of a finished one. -/
+def TakeCase (q q' : EffectQueue) (c : List Observed) : Prop :=
+  (q.status = .opened ∧ q.buffer ≠ [] ∧ q'.buffer = [] ∧ q'.status = .opened ∧
+      c = q.buffer.map Observed.entry) ∨
+  (∃ e₀, q.status = .closing e₀ ∧ q.buffer ≠ [] ∧ q'.buffer = [] ∧ q'.status = .done e₀ ∧
+      c = q.buffer.map Observed.entry) ∨
+  (∃ e₀, q.status = .done e₀ ∧ q'.buffer = [] ∧ q'.status = .shutDown ∧
+      c = [Observed.failed e₀])
+
+theorem status_ne_shutDown_of_opened {q : EffectQueue} (h : q.status = .opened) :
+    q.status ≠ .shutDown := by rw [h]; intro hc; exact QueueStatus.noConfusion hc
+
+theorem takeCase_fail {q q' : EffectQueue} {c : List Observed} (e : SubError)
+    (h : TakeCase q q' c) : TakeCase (q.fail e) (q'.fail e) c := by
+  have hfne : ∀ (p : EffectQueue), p.status = .opened → p.buffer ≠ [] →
+      (p.fail e).status = .closing e ∧ (p.fail e).buffer = p.buffer := by
+    intro p hs hne
+    refine ⟨?_, fail_buffer p e⟩
+    unfold EffectQueue.fail
+    rw [hs]
+    simp [List.isEmpty_eq_false_iff.mpr hne]
+  have hfe : ∀ (p : EffectQueue), p.status = .opened → p.buffer = [] →
+      (p.fail e).status = .done e ∧ (p.fail e).buffer = [] := by
+    intro p hs hb
+    refine ⟨?_, by rw [fail_buffer, hb]⟩
+    unfold EffectQueue.fail
+    rw [hs]
+    simp [hb]
+  rcases h with ⟨hs, hne, hb, hs2, hc⟩ | ⟨e0, hs, hne, hb, hs2, hc⟩ | ⟨e0, hs, hb, hs2, hc⟩
+  · refine Or.inr (Or.inl ⟨e, (hfne q hs hne).1, ?_, (hfe q' hs2 hb).2, (hfe q' hs2 hb).1, ?_⟩)
+    · rw [(hfne q hs hne).2]; exact hne
+    · rw [(hfne q hs hne).2]; exact hc
+  · have h1 : q.fail e = q := fail_of_ne_opened q e (by rw [hs]; intro hc2; exact QueueStatus.noConfusion hc2)
+    have h2 : q'.fail e = q' := fail_of_ne_opened q' e (by rw [hs2]; intro hc2; exact QueueStatus.noConfusion hc2)
+    rw [h1, h2]
+    exact Or.inr (Or.inl ⟨e0, hs, hne, hb, hs2, hc⟩)
+  · have h1 : q.fail e = q := fail_of_ne_opened q e (by rw [hs]; intro hc2; exact QueueStatus.noConfusion hc2)
+    have h2 : q'.fail e = q' := fail_of_ne_opened q' e (by rw [hs2]; intro hc2; exact QueueStatus.noConfusion hc2)
+    rw [h1, h2]
+    exact Or.inr (Or.inr ⟨e0, hs, hb, hs2, hc⟩)
+
+theorem erase_queue_congr (r : RtSubscriber) {q1 q2 : EffectQueue} (hb : q1.buffer = q2.buffer)
+    (hs : q1.status = q2.status) :
+    ({ r with queue := q1 } : RtSubscriber).erase
+      = ({ r with queue := q2 } : RtSubscriber).erase := by
+  unfold RtSubscriber.erase
+  simp only [hb, hs]
+
+theorem flatten_snoc (l : History) (c : List Observed) : (l ++ [c]).flatten = l.flatten ++ c := by
+  induction l with
+  | nil => simp
+  | cons x rest ih => simp only [List.cons_append, List.flatten_cons, ih, List.append_assoc]
+
+theorem pullStep_opened {a : Subscriber} (hs : a.status = .opened) (hne : a.pending ≠ []) :
+    pullStep a =
+      some { a with observed := a.observed ++ a.pending.map Observed.entry, pending := [] } := by
+  unfold pullStep
+  rw [hs]
+  simp [List.isEmpty_eq_false_iff.mpr hne]
+
+theorem pullStep_closing {a : Subscriber} {e : SubError} (hs : a.status = .closing e)
+    (hne : a.pending ≠ []) :
+    pullStep a =
+      some { a with
+               observed := a.observed ++ a.pending.map Observed.entry, pending := [],
+               status := .done e } := by
+  unfold pullStep
+  rw [hs]
+  simp [List.isEmpty_eq_false_iff.mpr hne]
+
+theorem pullStep_done {a : Subscriber} {e : SubError} (hs : a.status = .done e) :
+    pullStep a = some { a with observed := a.observed ++ [Observed.failed e],
+                               status := .shutDown } := by
+  unfold pullStep
+  rw [hs]
+
+/-- A returning take is the abstract `pullStep`. -/
+theorem take_corr_core {R : RtSubscriber} {a : Subscriber} {q2 : EffectQueue} {c : List Observed}
+    (hcs : R.closeStarted = false)
+    (hreg : R.registered = true → R.queue.status = .opened)
+    (hae : a = R.erase)
+    (hcase : TakeCase R.queue q2 c) :
+    ∃ a', pullStep a = some a' ∧ a'.observed = a.observed ++ c ∧
+      corrSub { R with queue := q2, chunks := R.chunks ++ [c] } a' := by
+  have hst : a.status = R.queue.status := by rw [hae]; rfl
+  have hpd : a.pending = R.queue.buffer := by rw [hae]; rfl
+  have hclosed : ∀ st : QueueStatus, q2.status = st → st ≠ .shutDown →
+      ¬ Closed ({ R with queue := q2, chunks := R.chunks ++ [c] } : RtSubscriber) := by
+    intro st hstq hne hcl
+    rcases hcl with hcl | hcl
+    · rw [show ({ R with queue := q2, chunks := R.chunks ++ [c] } : RtSubscriber).closeStarted
+          = R.closeStarted from rfl, hcs] at hcl
+      exact Bool.noConfusion hcl
+    · rw [show ({ R with queue := q2, chunks := R.chunks ++ [c] } : RtSubscriber).queue.status
+          = q2.status from rfl, hstq] at hcl
+      exact hne hcl
+  rcases hcase with ⟨hs, hne, hb, hs2, hc⟩ | ⟨e0, hs, hne, hb, hs2, hc⟩ | ⟨e0, hs, hb, hs2, hc⟩
+  · refine ⟨_, pullStep_opened (a := a) (by rw [hst, hs]) (by rw [hpd]; exact hne), ?_, ?_⟩
+    · show a.observed ++ a.pending.map Observed.entry = a.observed ++ c
+      rw [hpd, hc]
+    · refine corrSub_of_erase (hclosed .opened hs2 (fun hcc => QueueStatus.noConfusion hcc)) ?_
+      subst hae
+      show _ = ({ R with queue := q2, chunks := R.chunks ++ [c] } : RtSubscriber).erase
+      simp only [RtSubscriber.erase, hb, hs2, hs, hc, flatten_snoc]
+  · refine ⟨_, pullStep_closing (a := a) (by rw [hst, hs]) (by rw [hpd]; exact hne), ?_, ?_⟩
+    · show a.observed ++ a.pending.map Observed.entry = a.observed ++ c
+      rw [hpd, hc]
+    · refine corrSub_of_erase (hclosed (.done e0) hs2 (fun hcc => QueueStatus.noConfusion hcc)) ?_
+      subst hae
+      show _ = ({ R with queue := q2, chunks := R.chunks ++ [c] } : RtSubscriber).erase
+      simp only [RtSubscriber.erase, hb, hs2, hc, flatten_snoc]
+  · have hnr : R.registered = false := by
+      cases hb2 : R.registered with
+      | false => rfl
+      | true =>
+        rw [hreg hb2] at hs
+        exact absurd hs (fun hcc => QueueStatus.noConfusion hcc)
+    refine ⟨_, pullStep_done (a := a) (e := e0) (by rw [hst, hs]), ?_, ?_⟩
+    · show a.observed ++ [Observed.failed e0] = a.observed ++ c
+      rw [hc]
+    · refine corrSub_of_closed (Or.inr hs2) rfl ?_ ?_
+      · show a.registered = false
+        rw [hae]
+        exact hnr
+      · show a.observed ++ [Observed.failed e0] = (R.chunks ++ [c]).flatten
+        rw [flatten_snoc, hc, hae]
+        rfl
+
+theorem take_corr {r : RtSubscriber} {a : Subscriber} {e? : Option SubError}
+    {q' : EffectQueue} {c : List Observed}
+    (hro : r.registered = true → r.queue.status = .opened)
+    (hcs : r.closeStarted = false)
+    (hcorr : corrSub (failOpt e? r) a)
+    (hcase : TakeCase r.queue q' c) :
+    ∃ a', pullStep a = some a' ∧ a'.observed = a.observed ++ c ∧
+      corrSub (failOpt e? { r with queue := q', chunks := r.chunks ++ [c] }) a' := by
+  have hsd : r.queue.status ≠ .shutDown := by
+    rcases hcase with ⟨h, _⟩ | ⟨e0, h, _⟩ | ⟨e0, h, _⟩ <;> rw [h] <;> intro hc <;>
+      exact QueueStatus.noConfusion hc
+  have hae : a = (failOpt e? r).erase := hcorr.2 (not_closed_failOpt hcs hsd)
+  cases e? with
+  | none => exact take_corr_core hcs hro hae hcase
+  | some e =>
+    have hR : (rtFail e r).closeStarted = false := hcs
+    have hRreg : (rtFail e r).registered = true → (rtFail e r).queue.status = .opened := by
+      intro hb2
+      exact absurd hb2 (fun hcc => Bool.noConfusion hcc)
+    obtain ⟨a', h1, h2, h3⟩ := take_corr_core (R := rtFail e r) hR hRreg hae (takeCase_fail e hcase)
+    exact ⟨a', h1, h2, h3⟩
+
+/-- A parked pull changes nothing the abstract side can see. -/
+theorem park_corr {r : RtSubscriber} {a : Subscriber} {e? : Option SubError} {q' : EffectQueue}
+    (hcs : r.closeStarted = false) (hsd : r.queue.status ≠ .shutDown)
+    (hcorr : corrSub (failOpt e? r) a)
+    (hb : q'.buffer = r.queue.buffer) (hst : q'.status = r.queue.status) :
+    corrSub (failOpt e? { r with queue := q' }) a := by
+  have hsd2 : q'.status ≠ .shutDown := by rw [hst]; exact hsd
+  refine corrSub_of_erase (not_closed_failOpt hcs hsd2) ?_
+  rw [hcorr.2 (not_closed_failOpt hcs hsd)]
+  cases e? with
+  | none => exact erase_queue_congr r hb.symm hst.symm
+  | some e =>
+    show ({ r with registered := false, queue := r.queue.fail e } : RtSubscriber).erase
+        = ({ r with registered := false, queue := q'.fail e } : RtSubscriber).erase
+    refine erase_queue_congr ({ r with registered := false }) ?_ ?_
+    · rw [fail_buffer, fail_buffer, hb]
+    · rw [fail_status, fail_status, hst, hb]
+
+/-! ## The two halves of a scope closure -/
+
+theorem closeA_corr {r : RtSubscriber} {a : Subscriber} {e? : Option SubError}
+    (hcs : r.closeStarted = false) (hsd : r.queue.status ≠ .shutDown)
+    (hcorr : corrSub (failOpt e? r) a) :
+    a.status ≠ .shutDown ∧
+      corrSub (failOpt e? { r with registered := false, closeStarted := true })
+        { a with registered := false, pending := [], status := .shutDown } := by
+  have hae : a = (failOpt e? r).erase := hcorr.2 (not_closed_failOpt hcs hsd)
+  refine ⟨?_, corrSub_of_closed (closed_failOpt_of_closeStarted rfl) rfl rfl ?_⟩
+  · rw [hae]
+    show (failOpt e? r).queue.status ≠ .shutDown
+    exact failOpt_ne_shutDown hsd
+  · show a.observed = _
+    rw [corrSub_observed hcorr, failOpt_chunks, failOpt_chunks]
+
+theorem closeB_corr {r : RtSubscriber} {a : Subscriber} {e? : Option SubError}
+    (hcs : r.closeStarted = true) (hcorr : corrSub (failOpt e? r) a) :
+    corrSub (failOpt e? { r with queue := r.queue.shutdown, closeStarted := false }) a := by
+  obtain ⟨h1, h2, h3⟩ := hcorr.1 (closed_failOpt_of_closeStarted hcs)
+  refine corrSub_of_closed (closed_failOpt_of_shutDown rfl) h1 h2 ?_
+  rw [h3, failOpt_chunks, failOpt_chunks]
+
+/-! ## Reading the relation -/
+
+theorem runLabels_agreeExcept {i : SubId} : ∀ (ls : List Label) {s t s' : SubState},
+    AgreeExcept i s t → (∀ l ∈ ls, ∀ j, (l = .pull j ∨ l = .unsubscribe j) → j ≠ i) →
+    runLabels s ls = some s' → ∃ t', runLabels t ls = some t' ∧ AgreeExcept i s' t' := by
+  intro ls
+  induction ls with
+  | nil =>
+    intro s t s' hag _ hrun
+    cases hrun
+    exact ⟨t, rfl, hag⟩
+  | cons l rest ih =>
+    intro s t s' hag hls hrun
+    rw [runLabels_cons] at hrun
+    cases hap : apply s l with
+    | none => rw [hap] at hrun; cases hrun
+    | some u =>
+      rw [hap] at hrun
+      obtain ⟨v, hv, hagv⟩ := apply_agreeExcept hag (fun j hj => hls l (List.Mem.head _) j hj) hap
+      obtain ⟨t', ht', hagt⟩ := ih hagv (fun m hm => hls m (List.Mem.tail _ hm)) hrun
+      refine ⟨t', ?_, hagt⟩
+      rw [runLabels_cons, hv]
+      exact ht'
+
+theorem labelSerial_append : ∀ (l₁ l₂ : List Label),
+    labelSerial (l₁ ++ l₂) = labelSerial l₁ ++ labelSerial l₂ := by
+  intro l₁
+  induction l₁ with
+  | nil => intro l₂; rfl
+  | cons l rest ih =>
+    intro l₂
+    cases l with
+    | op o e => show _ :: labelSerial (rest ++ l₂) = _ :: (labelSerial rest ++ labelSerial l₂)
+                rw [ih]
+    | register stream opts l₀ id e =>
+      show _ :: labelSerial (rest ++ l₂) = _ :: (labelSerial rest ++ labelSerial l₂)
+      rw [ih]
+    | pull id => exact ih l₂
+    | unsubscribe id => exact ih l₂
+
+theorem owedOp_ne_pull (k : FanKind) (j : SubId) : owedOp k ≠ .pull j := by
+  cases k <;> intro h <;> exact Label.noConfusion h
+
+theorem owedOp_ne_unsubscribe (k : FanKind) (j : SubId) : owedOp k ≠ .unsubscribe j := by
+  cases k <;> intro h <;> exact Label.noConfusion h
+
+theorem abstractHistory_append (id : SubId) (l₁ l₂ : List Label) {t : SubState} {h₁ : History}
+    (hrun : runLabels initialSub l₁ = some t) (hh : abstractHistory l₁ id = some h₁) :
+    abstractHistory (l₁ ++ l₂) id = abstractHistoryFrom id t h₁ l₂ :=
+  abstractHistoryFrom_append id l₁ l₂ hrun hh
+
+theorem abstractHistory_isSome (id : SubId) (ls : List Label) {t : SubState}
+    (hrun : runLabels initialSub ls = some t) : ∃ h, abstractHistory ls id = some h :=
+  abstractHistoryFrom_isSome id ls [] hrun
+
+theorem lookupRt_update_self {s : RtState} {i : SubId} {r r' : RtSubscriber}
+    (h : lookupRt s.subs i = some r) :
+    lookupRt (updateRt s.subs i (fun _ => r')) i = some r' := by
+  rw [lookupRt_updateRt_self, h]
+  rfl
+
+theorem rtHistory_eq {s : RtState} {id : SubId} {r : RtSubscriber}
+    (h : lookupRt s.subs id = some r) : rtHistory s id = r.chunks := by
+  unfold rtHistory
+  rw [h]
+
+theorem isTargetOf_congr {a a' : Subscriber} (hs : a'.stream = a.stream)
+    (hr : a'.registered = a.registered) (hf : a'.filters = a.filters) (k : FanKind) :
+    isTargetOf k a' = isTargetOf k a := by
+  cases k <;> simp only [isTargetOf, hs, hr, hf]
+
+theorem isTargetOf_of_unregistered {a : Subscriber} (h : a.registered = false) (k : FanKind) :
+    isTargetOf k a = false := by
+  cases k <;> simp [isTargetOf, h]
+
+/-- What a consumer label can do to an abstract subscriber, as far as the fan-out's targeting is
+concerned: it keeps the `deliverOne`/`endOne` guard (and was not enabled on a shut-down
+subscriber), or it shuts the subscriber down. -/
+def TargetStable (a a' : Subscriber) : Prop :=
+  (a.status ≠ .shutDown ∧ a'.stream = a.stream ∧ a'.registered = a.registered ∧
+      a'.filters = a.filters) ∨ (a'.status = .shutDown ∧ a'.registered = false)
+
+/-- The witness of `A4Inclusion` has no `unsubscribe` label — the P5c export. -/
+def NoUnsub (ls : List Label) : Prop := ∀ l ∈ ls, ∀ i, l ≠ .unsubscribe i
+
+theorem noUnsub_append {l₁ l₂ : List Label} (h₁ : NoUnsub l₁) (h₂ : NoUnsub l₂) :
+    NoUnsub (l₁ ++ l₂) := by
+  intro l hl
+  rcases List.mem_append.mp hl with h | h
+  · exact h₁ l h
+  · exact h₂ l h
+
+theorem noUnsub_of_append {l₁ l₂ : List Label} (h : NoUnsub (l₁ ++ l₂)) :
+    NoUnsub l₁ ∧ NoUnsub l₂ :=
+  ⟨fun l hl => h l (List.mem_append.mpr (Or.inl hl)),
+   fun l hl => h l (List.mem_append.mpr (Or.inr hl))⟩
+
+theorem noUnsub_single {l : Label} (h : ∀ j, l ≠ .unsubscribe j) : NoUnsub [l] := by
+  intro m hm
+  cases List.mem_singleton.mp hm
+  exact h
+
+theorem agreeAt_of_agreeExcept {i id : SubId} {u u' : SubState} (h : AgreeExcept i u u')
+    (hne : id ≠ i) : AgreeAt id u u' :=
+  ⟨h.1, h.2.1, h.2.2.1, h.2.2.2 id hne⟩
+
+theorem applyUnsubscribe_agreeAt {k i : SubId} {s t : SubState} (hik : i ≠ k)
+    (h : apply s (.unsubscribe i) = some t) : AgreeAt k s t := by
+  obtain ⟨hl, hc, hn, hkeys⟩ := applyUnsubscribe_other hik h
+  exact ⟨hc, hn, hkeys, hl⟩
+
+/-- A subscriber whose point has not passed has no pending failure. -/
+theorem pendingFail_of_not_passed {f : FanOut} {id : SubId} (h : pointPassed f id = false)
+    (r : RtSubscriber) : pendingFail f id r = none := by
+  unfold pendingFail
+  cases hk : f.kind with
+  | delete _ => rfl
+  | publish stream m el =>
+    cases hd : f.decided with
+    | none => rfl
+    | some p =>
+      obtain ⟨j, b⟩ := p
+      cases b with
+      | false => simp
+      | true =>
+        by_cases hji : j = id
+        · exfalso
+          subst hji
+          unfold pointPassed at h
+          rw [hd] at h
+          simp at h
+        · simp [hji]
+
+theorem pendingOf_of_not_passed {f : FanOut} {id : SubId} (h : pointPassed f id = false)
+    (r : RtSubscriber) : pendingOf f id r = r := by
+  rw [pendingOf_eq, pendingFail_of_not_passed h]
+  rfl
+
+/-! ## The plumbing shared by `pull`, `wake`, `closeA`, and `closeB` -/
+
+/-- One consumer step of subscriber `i` matched by one abstract label. The abstract label goes
+into `labels` when `i`'s linearization point has not passed (or no fan-out is in flight) and into
+the owed suffix when it has. -/
+theorem rel_consumer {s s' : RtState} {i : SubId} {r r' : RtSubscriber} {lab : Label}
+    {ch : History} {labels owed : List Label}
+    (hlk : lookupRt s.subs i = some r)
+    (hupd : s' = { s with subs := updateRt s.subs i (fun _ => r') })
+    (hlab : lab = .pull i ∨ lab = .unsubscribe i)
+    (hchunks : r'.chunks = r.chunks ++ ch)
+    (hpend : ∀ f, pendingFail f i r' = pendingFail f i r)
+    (habs : ∀ (e? : Option SubError) (u : SubState) (a : Subscriber),
+        lookupSub u.subs i = some a → corrSub (failOpt e? r) a →
+        ∃ u' a', apply u lab = some u' ∧ AgreeExcept i u u' ∧ lookupSub u'.subs i = some a' ∧
+          corrSub (failOpt e? r') a' ∧ a'.observed = a.observed ++ ch.flatten ∧
+          TargetStable a a')
+    (hafter : ∀ (u u' : SubState) (a a' : Subscriber) (h : History),
+        lookupSub u.subs i = some a → lookupSub u'.subs i = some a' →
+        a'.observed = a.observed ++ ch.flatten → afterLabel u u' i h lab = h ++ ch)
+    (hrel : Rel s labels owed) (hhist : RelHist s labels owed) :
+    ∃ labels' owed', Rel s' labels' owed' ∧ RelHist s' labels' owed' ∧
+      labelSerial labels' ++ labelSerial owed' = labelSerial labels ++ labelSerial owed ∧
+      (NoUnsub labels → NoUnsub owed → (∀ j, lab ≠ .unsubscribe j) →
+        NoUnsub labels' ∧ NoUnsub owed') := by
+  obtain ⟨sA, hrun, hnext, hkeys, hquiet, hflight⟩ := hrel
+  have hlk' : lookupRt s'.subs i = some r' := by rw [hupd]; exact lookupRt_update_self hlk
+  have hlkne : ∀ id, id ≠ i → lookupRt s'.subs id = lookupRt s.subs id := by
+    intro id hid
+    rw [hupd]
+    exact lookupRt_updateRt_ne s.subs id i (fun _ => r') hid
+  have hkeys' : s'.subs.map Prod.fst = s.subs.map Prod.fst := by
+    rw [hupd]; exact updateRt_keys s.subs i (fun _ => r')
+  have hnext' : s'.nextId = s.nextId := by rw [hupd]
+  have hcore' : s'.core = s.core := by rw [hupd]
+  have hfan' : s'.fanOut = s.fanOut := by rw [hupd]
+  have hhistNe : ∀ id, id ≠ i → rtHistory s' id = rtHistory s id := by
+    intro id hid
+    unfold rtHistory
+    rw [hlkne id hid]
+  have hhistSelf : rtHistory s' i = rtHistory s i ++ ch := by
+    rw [rtHistory_eq hlk', rtHistory_eq hlk, hchunks]
+  have hlabSerial : labelSerial [lab] = [] := by
+    rcases hlab with h | h <;> rw [h] <;> rfl
+  have hafterNe : ∀ (u u' : SubState) (h : History) (id : SubId), id ≠ i →
+      afterLabel u u' id h lab = h := by
+    intro u u' h id hid
+    rcases hlab with hl | hl <;> subst hl
+    · show (if i = id then _ else h) = h
+      exact if_neg (fun he => hid he.symm)
+    · rfl
+  have hagreeAt : ∀ (u u' : SubState) (id : SubId), id ≠ i → apply u lab = some u' →
+      AgreeAt id u u' := by
+    intro u u' id hid hap
+    rcases hlab with hl | hl <;> subst hl
+    · exact applyPull_agreeAt (fun he => hid he.symm) hap
+    · exact applyUnsubscribe_agreeAt (fun he => hid he.symm) hap
+  have hisSome : ∀ id, (lookupRt s'.subs id).isSome = true → (lookupRt s.subs id).isSome = true := by
+    intro id hs
+    by_cases hid : id = i
+    · subst hid; rw [hlk]; rfl
+    · rw [← hlkne id hid]; exact hs
+  cases hfan : s.fanOut with
+  | none =>
+    obtain ⟨howed, hcoreA, hcorr⟩ := hquiet hfan
+    subst howed
+    obtain ⟨a, hlka, hca⟩ := hcorr i r hlk
+    obtain ⟨sA', a', hap, hag, hlka', hca', hobs', -⟩ := habs none sA a hlka hca
+    refine ⟨labels ++ [lab], [], ⟨sA', runLabels_snoc hrun hap, ?_, ?_, ?_, ?_⟩, ?_, ?_, ?_⟩
+    · rw [hag.2.1, hnext, hnext']
+    · rw [hag.2.2.1, hkeys, hkeys']
+    · intro _
+      refine ⟨rfl, ?_, ?_⟩
+      · rw [hag.1, hcoreA, hcore']
+      · intro id r₀ hlkr
+        by_cases hid : id = i
+        · subst hid
+          rw [hlk'] at hlkr
+          cases hlkr
+          exact ⟨a', hlka', hca'⟩
+        · rw [hlkne id hid] at hlkr
+          obtain ⟨b, hlkb, hcb⟩ := hcorr id r₀ hlkr
+          exact ⟨b, (hag.2.2.2 id hid).trans hlkb, hcb⟩
+    · intro g hg
+      rw [hfan', hfan] at hg
+      cases hg
+    · intro id hsome
+      refine ⟨fun _ => ?_, fun g hg => ?_⟩
+      · have hbase : abstractHistory labels id = some (rtHistory s id) :=
+          (hhist id (hisSome id hsome)).1 hfan
+        rw [abstractHistory_append id labels [lab] hrun hbase]
+        show (match apply sA lab with
+              | some u => abstractHistoryFrom id u (afterLabel sA u id (rtHistory s id) lab) []
+              | none => none) = _
+        rw [hap]
+        show some (afterLabel sA sA' id (rtHistory s id) lab) = _
+        by_cases hid : id = i
+        · subst hid
+          rw [hafter sA sA' a a' (rtHistory s id) hlka hlka' hobs', ← hhistSelf]
+        · rw [hafterNe sA sA' (rtHistory s id) id hid, hhistNe id hid]
+      · rw [hfan', hfan] at hg
+        cases hg
+    · rw [labelSerial_append, hlabSerial, List.append_nil]
+    · intro hnl _ hlu
+      exact ⟨noUnsub_append hnl (noUnsub_single hlu), fun l hl => by cases hl⟩
+  | some f =>
+    obtain ⟨hfresh, hpre, hrcore, hcorrPre, owedRest, sPost, howed, howedOk, hrunPost, hcorrPost⟩ :=
+      hflight f hfan
+    have howedNe : ∀ l ∈ owed, ∀ j, (l = .pull j ∨ l = .unsubscribe j) → pointPassed f j = true := by
+      intro l hl j hj
+      rw [howed] at hl
+      rcases List.mem_cons.mp hl with he | hm
+      · exfalso
+        subst he
+        rcases hj with hj | hj
+        · exact owedOp_ne_pull f.kind j hj
+        · exact owedOp_ne_unsubscribe f.kind j hj
+      · obtain ⟨k, hk, hpk⟩ := howedOk l hm
+        rcases hk with hk | hk <;> subst hk <;> rcases hj with hj | hj <;>
+          first
+            | (cases hj; exact hpk)
+            | exact Label.noConfusion hj
+    have hgf : ∀ g, s'.fanOut = some g → g = f := by
+      intro g hg
+      rw [hfan', hfan] at hg
+      exact (Option.some.inj hg).symm
+    by_cases hpp : pointPassed f i = true
+    · obtain ⟨aP, hlkaP, hcaP⟩ := hcorrPost i r hlk hpp
+      obtain ⟨sPost', a', hap, hag, hlka', hca', hobs', -⟩ :=
+        habs (pendingFail f i r) sPost aP hlkaP hcaP
+      have hrunAll : runLabels initialSub (labels ++ owed) = some sPost :=
+        (runLabels_append labels owed hrun).trans hrunPost
+      refine ⟨labels, owed ++ [lab], ⟨sA, hrun, ?_, ?_, ?_, ?_⟩, ?_, ?_, ?_⟩
+      · rw [hnext, hnext']
+      · rw [hkeys, hkeys']
+      · intro hq
+        rw [hfan', hfan] at hq
+        cases hq
+      · intro g hg
+        rw [hgf g hg]
+        refine ⟨hfresh, hpre, ?_, ?_, owedRest ++ [lab], sPost', ?_, ?_, ?_, ?_⟩
+        · exact ⟨fun stream m el hk => by rw [hcore']; exact hrcore.1 stream m el hk,
+            fun name hk => by rw [hcore']; exact hrcore.2 name hk⟩
+        · intro id r₀ hlkr hnpid
+          by_cases hid : id = i
+          · subst hid
+            rw [hpp] at hnpid
+            exact Bool.noConfusion hnpid
+          · rw [hlkne id hid] at hlkr
+            exact hcorrPre id r₀ hlkr hnpid
+        · rw [howed]; rfl
+        · intro l hl
+          rcases List.mem_append.mp hl with hm | hm
+          · exact howedOk l hm
+          · cases List.mem_singleton.mp hm
+            rcases hlab with hl' | hl'
+            · exact ⟨i, Or.inl hl', hpp⟩
+            · exact ⟨i, Or.inr hl', hpp⟩
+        · exact runLabels_snoc hrunPost hap
+        · intro id r₀ hlkr hp
+          by_cases hid : id = i
+          · subst hid
+            rw [hlk'] at hlkr
+            cases hlkr
+            refine ⟨a', hlka', ?_⟩
+            rw [pendingOf_eq, hpend f]
+            exact hca'
+          · rw [hlkne id hid] at hlkr
+            obtain ⟨b, hlkb, hcb⟩ := hcorrPost id r₀ hlkr hp
+            exact ⟨b, (hag.2.2.2 id hid).trans hlkb, hcb⟩
+      · intro id hsome
+        obtain ⟨-, hf⟩ := hhist id (hisSome id hsome)
+        obtain ⟨hpass, hnpass⟩ := hf f hfan
+        refine ⟨fun hq => ?_, fun g hg => ?_⟩
+        · rw [hfan', hfan] at hq
+          cases hq
+        · rw [hgf g hg]
+          refine ⟨fun hp => ?_, fun hnpid => ?_⟩
+          · rw [← List.append_assoc,
+              abstractHistory_append id (labels ++ owed) [lab] hrunAll (hpass hp)]
+            show (match apply sPost lab with
+                  | some u => abstractHistoryFrom id u
+                      (afterLabel sPost u id (rtHistory s id) lab) []
+                  | none => none) = _
+            rw [hap]
+            show some (afterLabel sPost sPost' id (rtHistory s id) lab) = _
+            by_cases hid : id = i
+            · subst hid
+              rw [hafter sPost sPost' aP a' (rtHistory s id) hlkaP hlka' hobs', ← hhistSelf]
+            · rw [hafterNe sPost sPost' (rtHistory s id) id hid, hhistNe id hid]
+          · have hid : id ≠ i := by
+              intro he
+              subst he
+              rw [hpp] at hnpid
+              exact Bool.noConfusion hnpid
+            rw [hhistNe id hid]
+            exact hnpass hnpid
+      · rw [labelSerial_append, hlabSerial, List.append_nil]
+      · intro hnl hno hlu
+        exact ⟨hnl, noUnsub_append hno (noUnsub_single hlu)⟩
+    · have hnp : pointPassed f i = false := by
+        cases hb : pointPassed f i with
+        | false => rfl
+        | true => exact absurd hb hpp
+      obtain ⟨a, hlka, hca⟩ := hcorrPre i r hlk hnp
+      obtain ⟨sA', a', hap, hag, hlka', hca', hobs', htgt⟩ := habs none sA a hlka hca
+      obtain ⟨sPost', hrunPost', hagPost⟩ :=
+        runLabels_agreeExcept owed hag
+          (fun l hl j hj he => by
+            subst he
+            rw [howedNe l hl j hj] at hnp
+            exact Bool.noConfusion hnp)
+          hrunPost
+      refine ⟨labels ++ [lab], owed, ⟨sA', runLabels_snoc hrun hap, ?_, ?_, ?_, ?_⟩, ?_, ?_, ?_⟩
+      · rw [hag.2.1, hnext, hnext']
+      · rw [hag.2.2.1, hkeys, hkeys']
+      · intro hq
+        rw [hfan', hfan] at hq
+        cases hq
+      · intro g hg
+        rw [hgf g hg]
+        refine ⟨hfresh, ?_, ?_, ?_, owedRest, sPost', howed, howedOk, hrunPost', ?_⟩
+        · intro id b hlkb hnpb
+          by_cases hid : id = i
+          · subst hid
+            rw [hlka'] at hlkb
+            cases hlkb
+            obtain ⟨hs, hpre₂⟩ := hpre id a hlka hnp
+            rcases htgt with ⟨hne, hst, hrg, hfl⟩ | ⟨hsd, hrg⟩
+            · refine ⟨?_, ?_⟩
+              · rcases hs with hsc | hst₀
+                · exact Or.inl hsc
+                · exact Or.inr (by rw [isTargetOf_congr hst hrg hfl]; exact hst₀)
+              · intro hsch
+                rcases hpre₂ hsch with h | h
+                · exact absurd h hne
+                · exact Or.inr (by rw [isTargetOf_congr hst hrg hfl]; exact h)
+            · exact ⟨Or.inr (isTargetOf_of_unregistered hrg _), fun _ => Or.inl hsd⟩
+          · rw [hag.2.2.2 id hid] at hlkb
+            exact hpre id b hlkb hnpb
+        · exact ⟨fun stream m el hk => by rw [hcore', hag.1]; exact hrcore.1 stream m el hk,
+            fun name hk => by rw [hcore', hag.1]; exact hrcore.2 name hk⟩
+        · intro id r₀ hlkr hnpid
+          by_cases hid : id = i
+          · subst hid
+            rw [hlk'] at hlkr
+            cases hlkr
+            exact ⟨a', hlka', hca'⟩
+          · rw [hlkne id hid] at hlkr
+            obtain ⟨b, hlkb, hcb⟩ := hcorrPre id r₀ hlkr hnpid
+            exact ⟨b, (hag.2.2.2 id hid).trans hlkb, hcb⟩
+        · intro id r₀ hlkr hp
+          have hid : id ≠ i := by
+            intro he
+            subst he
+            rw [hnp] at hp
+            exact Bool.noConfusion hp
+          rw [hlkne id hid] at hlkr
+          obtain ⟨b, hlkb, hcb⟩ := hcorrPost id r₀ hlkr hp
+          exact ⟨b, (hagPost.2.2.2 id hid).trans hlkb, hcb⟩
+      · intro id hsome
+        obtain ⟨-, hf⟩ := hhist id (hisSome id hsome)
+        obtain ⟨hpass, hnpass⟩ := hf f hfan
+        refine ⟨fun hq => ?_, fun g hg => ?_⟩
+        · rw [hfan', hfan] at hq
+          cases hq
+        · rw [hgf g hg]
+          refine ⟨fun hp => ?_, fun hnpid => ?_⟩
+          · have hid : id ≠ i := by
+              intro he
+              subst he
+              rw [hnp] at hp
+              exact Bool.noConfusion hp
+            obtain ⟨h₀, hh₀⟩ := abstractHistory_isSome id labels hrun
+            have e₁ : abstractHistory (labels ++ owed) id = abstractHistoryFrom id sA h₀ owed :=
+              abstractHistory_append id labels owed hrun hh₀
+            have e₂ : abstractHistory (labels ++ [lab]) id = some h₀ := by
+              rw [abstractHistory_append id labels [lab] hrun hh₀]
+              show (match apply sA lab with
+                    | some u => abstractHistoryFrom id u (afterLabel sA u id h₀ lab) []
+                    | none => none) = _
+              rw [hap]
+              show some (afterLabel sA sA' id h₀ lab) = some h₀
+              rw [hafterNe sA sA' h₀ id hid]
+            rw [abstractHistory_append id (labels ++ [lab]) owed (runLabels_snoc hrun hap) e₂,
+              ← (abstractHistoryFrom_congr owed (h := h₀) (hagreeAt sA sA' id hid hap)
+                  hrunPost hrunPost').2, ← e₁, hhistNe id hid]
+            exact hpass hp
+          · rw [abstractHistory_append id labels [lab] hrun (hnpass hnpid)]
+            show (match apply sA lab with
+                  | some u => abstractHistoryFrom id u
+                      (afterLabel sA u id (rtHistory s id) lab) []
+                  | none => none) = _
+            rw [hap]
+            show some (afterLabel sA sA' id (rtHistory s id) lab) = _
+            by_cases hid : id = i
+            · subst hid
+              rw [hafter sA sA' a a' (rtHistory s id) hlka hlka' hobs', ← hhistSelf]
+            · rw [hafterNe sA sA' (rtHistory s id) id hid, hhistNe id hid]
+      · rw [labelSerial_append, hlabSerial, List.append_nil]
+      · intro hnl hno hlu
+        exact ⟨noUnsub_append hnl (noUnsub_single hlu), hno⟩
+
 end EffectNatsSubstrate
