@@ -362,13 +362,7 @@ theorem lagInv_pullStep {s : SubState} {sub sub' : Subscriber} (hinv : SubInv s 
       rw [hopen] at h''
       cases h''
     · intro stream' n' h'
-      exfalso
-      have h'' : (sub.observed ++ sub.pending.map Observed.entry).getLast?
-          = some (.failed (.consumerLagged stream' n')) := h'
-      rw [List.getLast?_append, List.getLast?_map] at h''
-      cases hlast : sub.pending.getLast? with
-      | none => exact hne' (List.getLast?_eq_none_iff.mp hlast)
-      | some x => rw [hlast] at h''; simp at h''
+      exact absurd h' (getLast?_visible_ne_failed hne').elim
   · rw [heq]
     refine ⟨?_, ?_, ?_⟩
     · intro stream' n' h'; cases h'
@@ -381,13 +375,7 @@ theorem lagInv_pullStep {s : SubState} {sub sub' : Subscriber} (hinv : SubInv s 
       show some sub.lastEnqueued = some n'
       rw [hl.closingLag stream' n' hst]
     · intro stream' n' h'
-      exfalso
-      have h'' : (sub.observed ++ sub.pending.map Observed.entry).getLast?
-          = some (.failed (.consumerLagged stream' n')) := h'
-      rw [List.getLast?_append, List.getLast?_map] at h''
-      cases hlast : sub.pending.getLast? with
-      | none => exact hne' (List.getLast?_eq_none_iff.mp hlast)
-      | some x => rw [hlast] at h''; simp at h''
+      exact absurd h' (getLast?_visible_ne_failed hne').elim
 
 theorem lagInv_unsubscribe {sub : Subscriber} (hl : LagInv sub) :
     LagInv { sub with registered := false, pending := [], status := .shutDown } := by

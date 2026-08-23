@@ -248,6 +248,16 @@ theorem visible_drain_done (sub : Subscriber) (e : SubError) :
       = visible sub := by
   simp [visible]
 
+theorem getLast?_visible_ne_failed {sub : Subscriber} {e : SubError}
+    (hne : sub.pending ≠ []) :
+    (sub.observed ++ sub.pending.map Observed.entry).getLast?
+      ≠ some (Observed.failed e) := by
+  intro h''
+  rw [List.getLast?_append, List.getLast?_map] at h''
+  cases hlast : sub.pending.getLast? with
+  | none => exact absurd (List.getLast?_eq_none_iff.mp hlast) hne
+  | some x => rw [hlast] at h''; simp at h''
+
 theorem pairwise_sublist_of_append_left {l₁ l₂ : List Nat}
     (h : (l₁ ++ l₂).Pairwise (· < ·)) : l₁.Pairwise (· < ·) :=
   (List.pairwise_append.mp h).1
