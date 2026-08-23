@@ -235,20 +235,14 @@ theorem create_restarts {s : SubState} {raw : RawStreamConfig} {s' : SubState} {
     st.nextSequence = 1 := by
   obtain ⟨core', hstep, rfl⟩ := applyOp_ok_eq h
   simp only [afterOp] at hst
-  have hc : createStep s.core raw = .ok (core', .unit) := hstep
-  unfold createStep at hc
-  split at hc
-  · cases hc
-  · rename_i config hval
-    have hname : config.name = raw.name := (validate_ok_sound hval).1
-    split at hc
-    · rename_i st₀ hlook
-      rw [hname, habsent] at hlook
-      cases hlook
-    · cases hc
-      rw [hname, lookup_insert] at hst
-      cases hst
-      rfl
+  rcases createStep_ok_shape (show createStep s.core raw = .ok (core', .unit) from hstep) with
+    rfl | ⟨config, hval, -, rfl⟩
+  · rw [habsent] at hst
+    cases hst
+  · have hname : config.name = raw.name := (validate_ok_sound hval).1
+    rw [hname, lookup_insert] at hst
+    cases hst
+    rfl
 
 /-! ## SA7 — T13′ through the lag invariant -/
 
