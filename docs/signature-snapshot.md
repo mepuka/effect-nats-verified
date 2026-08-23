@@ -397,8 +397,10 @@ returns to the slice document.
   `all_sub_negatives`; `replayBound` and `SubShape` in the carriers block; the SA5h block
   (history-extended model, slice §9.2 — the global T8′ form the Pass A text stated, now over an
   Abadi–Lamport history variable with an erasure theorem). Downstream: none of SA1–SA3 changes.
-- `lagged_iff` — **post-ratification amendment (2026-08-22, late night), owner approval
-  requested**: old: no state hypothesis; new: `(hreach : ReachableSub s)`. Missing assumption:
+- `lagged_iff` — **post-ratification amendment (2026-08-22, late night), approved by the owner
+  the same night**: old: no state hypothesis; new: `(hreach : ReachableSub s)`. The
+  explicit-premise helper `lagged_iff_of_open` (`status = opened`, `pending.length ≤ n` in
+  place of reachability) landed with the cleanup lane; `lagged_iff` is its corollary. Missing assumption:
   without it a registered subscriber already in `closing (consumerLagged …)` — unreachable by
   `registeredOpen`, but expressible — satisfies the left side with `pending.length < n`, and an
   over-full buffer — unreachable by `capacity` — overflows with `pending.length ≠ n`. The
