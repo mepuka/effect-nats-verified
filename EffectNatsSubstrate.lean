@@ -16,6 +16,7 @@ import EffectNatsSubstrate.SubPlacements
 import EffectNatsSubstrate.EffectQueue
 import EffectNatsSubstrate.Runtime
 import EffectNatsSubstrate.RtTraces
+import EffectNatsSubstrate.RtInvariants
 import EffectNatsSubstrate.Sim
 import EffectNatsSubstrate.SubInvariants
 import EffectNatsSubstrate.SubCore

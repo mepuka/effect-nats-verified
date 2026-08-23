@@ -10,18 +10,27 @@ design note's verified §3.1–§3.3):
 
 - `size` is the buffer length unless the queue is finished (`sizeUnsafe`,
   `Queue.ts:1789`: `Done` → 0);
-- `offer` appends to an `Open` queue and returns `true`; on any other state it
-  returns `false` and changes nothing (`:645-648`). Under `TerminateOnLag` the
-  size check precedes every offer, so the suspending branch (`:659`) is never
-  reached — it is stage B2's subject;
+- `offer` appends to an `Open` queue with room and reports `accepted`; on any
+  other state it reports `refused` and changes nothing (`:645-648`); at capacity
+  under the default `"suspend"` strategy the real `offer` parks the publisher
+  (`:649`, `:659`; `Queue.bounded(n)` is `make({ capacity: n })`, `:500`, `:458`)
+  — the model reports `wouldSuspend` and the runtime step that would take it is
+  disabled, so the B1/B2 boundary is explicit: under `TerminateOnLag` the size
+  check precedes every offer and `wouldSuspend` is unreachable (an `RtInv`
+  clause); stage B2 gives it a transition;
 - `fail` on an `Open` queue with an empty buffer finishes it at once (`done e`);
   with a non-empty buffer it becomes `closing e` and keeps the buffer
   (`failCauseUnsafe`, `:1000-1015`); on a non-open queue it is a no-op;
 - `takeAll` returns the whole buffer (`takeBetween(self, 1, +∞)`, `:1297-1298`,
   `:1994-1998`) and clears it; a `closing` queue whose buffer is now empty
-  finishes (`releaseCapacity`, `:2040-2047`); on a `done` queue the stored exit
-  is returned (`takeUnsafe`, `:1607-1608`); on an `open` empty buffer the taker
-  parks until an offer, a failure, or a shutdown;
+  finishes (`releaseCapacity`, `:2040-2047` — which is also why an empty
+  `closing` queue never exists: the finalisation happens in the same step as
+  the emptying); on a `done` queue the stored exit is returned (`takeUnsafe`,
+  `:1607-1608`); on an `open` empty buffer the taker parks until an offer, a
+  failure, or a shutdown. A parked taker is resumed by the scheduled release an
+  `offer` queues (`:667`, `:1969-1975`, `releaseTakers` `:1955-1967`, which
+  returns early only on `Done`) — so it also resumes on a `closing` queue, takes
+  the kept buffer, and the queue finishes;
 - `shutdown` clears the buffer and finishes the queue (`:1191-1210`); the
   consumer fiber whose scope closed is interrupted, so nothing is observed after.
 
@@ -51,11 +60,22 @@ def size (q : EffectQueue) : Nat :=
   | .shutDown => 0
   | _ => q.buffer.length
 
-/-- `offer`: append if `Open`, else `false` and no change. -/
-def offer (q : EffectQueue) (m : StoredMessage) : EffectQueue × Bool :=
+/-- What one `offer` did. -/
+inductive OfferResult where
+  | accepted
+  /-- The queue is not `Open`: `false`, no change. -/
+  | refused
+  /-- At capacity: the real offer would park the publisher (stage B2). -/
+  | wouldSuspend
+  deriving Repr, DecidableEq
+
+/-- `offer` against the queue's capacity. -/
+def offer (cap : Nat) (q : EffectQueue) (m : StoredMessage) : EffectQueue × OfferResult :=
   match q.status with
-  | .opened => ({ q with buffer := q.buffer ++ [m] }, true)
-  | _ => (q, false)
+  | .opened =>
+    if q.buffer.length < cap then ({ q with buffer := q.buffer ++ [m] }, .accepted)
+    else (q, .wouldSuspend)
+  | _ => (q, .refused)
 
 /-- `fail`: `done` on an empty buffer, `closing` on a non-empty one; no-op
 unless `Open`. -/
@@ -92,8 +112,10 @@ def takeAll (q : EffectQueue) : EffectQueue × TakeResult :=
     if q.buffer.isEmpty then (q, .interrupted)
     else ({ q with buffer := [], status := .done e }, .chunk q.buffer)
 
-/-- A parked taker resumes: after an offer it takes the buffer; after a failure
-on the empty buffer it takes the exit; after a shutdown it is interrupted. -/
+/-- A parked taker resumes: after an offer it takes the buffer (and, if the
+queue was failed meanwhile, finishes it — `releaseTakers` resumes on `Closing`
+too); after a failure on the empty buffer it takes the exit. `shutdown` clears
+the taker, so no parked taker survives a shutdown. -/
 def wake (q : EffectQueue) : Option (EffectQueue × TakeResult) :=
   if !q.taker then none
   else
@@ -101,9 +123,11 @@ def wake (q : EffectQueue) : Option (EffectQueue × TakeResult) :=
     | .opened =>
       if q.buffer.isEmpty then none
       else some ({ q with buffer := [], taker := false }, .chunk q.buffer)
+    | .closing e =>
+      if q.buffer.isEmpty then none
+      else some ({ q with buffer := [], status := .done e, taker := false }, .chunk q.buffer)
     | .done e => some ({ q with status := .shutDown, taker := false }, .exit e)
-    | .shutDown => some ({ q with taker := false }, .interrupted)
-    | .closing _ => none
+    | .shutDown => none
 
 end EffectQueue
 

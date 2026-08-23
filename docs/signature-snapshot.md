@@ -1,8 +1,9 @@
 # Signature snapshot — public proof surface
 
-**Snapshot:** 2026-08-22, revision 2.1 — second slice (T3–T7) frozen over the first slice
-(T1/T2); r2.1 restates the traces as data (revision log). 31 frozen declarations below; the
-package holds 76 non-private theorems in all.
+**Snapshot:** 2026-08-23, revision 4 — stage B1 (r4) frozen over stage A (r3.1, ratified
+2026-08-22; r3.2 addition 2026-08-23) over the sequential core (r1–r2.1). The frozen surface is the
+union of the sections below (r1, r2, Stage A (r3.1), Stage B1 (r4)); the package holds 230
+non-private theorems in all, of which the r4 obligations are not yet proved.
 **Imports:** Lean core only (`leanprover/lean4:v4.33.0`); no Std/Batteries/Mathlib.
 **Semantic contract:** `research/2026-08-22-first-slice-jetstream-memory-lean-model.md`
 §3–§4 (corrected revision); transliteration pins `mepuka/effect-nats` @ `d06223f` (r1–r2.1) and
@@ -46,6 +47,11 @@ proof bodies and proved helper lemmas may change freely.
   SA4d and the negative witnesses added, assumption A4 named. SA1–SA3 were proved while r3 was
   proposed — ahead of the slices plan's "frozen before proofs" gate; those proofs are evidence
   for the candidates, not of ratification.
+- **r4 (2026-08-23, stage B1 frozen).** The runtime model (`EffectQueue`, `Runtime`, `RtTraces`,
+  `Sim`, `RtInvariants`) and the stage-B1 obligations SB1–SB7 (`A4Inclusion`, `A4Complete`, the
+  queue laws, commutation, `RtInv` preservation, the core frame, T14′ on runtime states); see the
+  Stage B1 (r4) section. Frozen under the owner's standing delegation of 2026-08-23 after the Pass B
+  probes (slice document increment 5).
 - **r3.2 (2026-08-23, addition; no statement changed).** A ninth stage-A trace `saReplayLag` /
   `sa_replay_lag_trace` (`SubTraces.lean`): replay into a `TerminateOnLag 1` buffer, the one shape
   that can reach the live adapter's replay-through-the-queue class (ADR-0008; overwatch finding
@@ -433,3 +439,154 @@ returns to the slice document.
   the lag invariant `LagInv`, the negatives), `SubHistory` (SA5h through the ledger invariant
   `HistInv`). SA7 goes through `LagInv` (a separate per-subscriber predicate proved with
   `reachableSub_all`, not a widening of `SubInv`).
+
+
+## Stage B1 (r4) — frozen 2026-08-23 under the owner's standing delegation
+
+- **Status:** frozen 2026-08-23 by the Claude lane under the owner's delegation of 2026-08-23
+  ("none of that required escalation … get everything else done"), recorded in
+  `research/2026-08-23-effect-nats-lanes-plan.md`; the owner may reopen any statement at the
+  next check-in. Pass A ratified by the owner 2026-08-23
+  (`research/2026-08-23-subscriber-stage-b.md`, increments 1–2); representation, statement, and
+  the Pass B probes in increments 3–5 of the same document.
+- **Pin:** the runtime model transliterates `src/internal/JetStreamMemory.ts` @ `bec02ac`
+  (subscriber path byte-identical to `872bd7f`) and `effect/src/Queue.ts` @ `4.0.0-rc.111`.
+- **Scope:** `TerminateOnLag` only; `PullWindow`'s suspended offers are `wouldSuspend`, an
+  outcome the runtime model cannot take (stage B2). Environment assumptions E1–E5 of the slice
+  document §2.4 are kept, not discharged.
+- **Probe record (Pass B):** every candidate statement was run against an exhaustive enumeration
+  of reachable runtime states in four families (129 + 3 801 + 90 + 106 states; one and two
+  subscribers, capacities 1–2, two to three publishes, a deletion, all scope-closure steps):
+  no stuck consumer, every `RtInv` clause true, `wouldSuspend` unreachable, and for every
+  quiescent state a stage-A witness with its serial sequence, all its chunk histories and its
+  subscriber count (`research/logs/rt_probe9.lean`; the overwatch's `rt_probe{,2..8}.lean` found
+  the three definition defects and four false clauses this freeze corrected — slice document
+  increment 5).
+
+### Carriers, labels, transition (frozen with r4)
+
+```text
+-- EffectQueue.lean
+structure EffectQueue where buffer : List StoredMessage; status : QueueStatus; taker : Bool
+inductive EffectQueue.OfferResult | accepted | refused | wouldSuspend
+inductive EffectQueue.TakeResult | chunk (ms : List StoredMessage) | exit (e : SubError) | parked | interrupted
+def EffectQueue.empty : EffectQueue
+def EffectQueue.size (q : EffectQueue) : Nat
+def EffectQueue.offer (cap : Nat) (q : EffectQueue) (m : StoredMessage) : EffectQueue × OfferResult
+def EffectQueue.fail (q : EffectQueue) (e : SubError) : EffectQueue
+def EffectQueue.shutdown (_q : EffectQueue) : EffectQueue
+def EffectQueue.takeAll (q : EffectQueue) : EffectQueue × TakeResult
+def EffectQueue.wake (q : EffectQueue) : Option (EffectQueue × TakeResult)
+-- Runtime.lean
+inductive Outcome | admitted | overflowed | skipped | ended
+inductive FanKind | publish (stream : StreamName) (m : StoredMessage) (expectedLast : Option StreamSeq) | delete (name : StreamName)
+structure FanOut where kind : FanKind; remaining : List SubId; decided : Option (SubId × Bool); visited : List (SubId × Outcome)
+structure RtSubscriber where stream : StreamName; filters : List SubjectName; policy : Policy; registered : Bool;
+  lastEnqueued : StreamSeq; queue : EffectQueue; chunks : History; closeStarted : Bool
+structure RtState where core : JSState; subs : List (SubId × RtSubscriber); nextId : SubId; fanOut : Option FanOut
+def initialRt : RtState
+def lookupRt : List (SubId × RtSubscriber) → SubId → Option RtSubscriber
+def updateRt : List (SubId × RtSubscriber) → SubId → (RtSubscriber → RtSubscriber) → List (SubId × RtSubscriber)
+def RtSubscriber.erase (r : RtSubscriber) : Subscriber        -- observed := r.chunks.flatten
+def eraseRt (s : RtState) : SubState
+def rtHistory (s : RtState) (id : SubId) : History
+inductive RtLabel | op (o : Op) (expect : Expect) | register (stream) (opts) (lastEnqueued₀) (id) (expect)
+  | check (id : SubId) | resolve (id : SubId) | endFanOut | pull (id : SubId) | wake (id : SubId)
+  | closeA (id : SubId) | closeB (id : SubId)
+def fanOutIds (s : RtState) (stream : StreamName) (subject : SubjectName) : List SubId
+def deleteIds (s : RtState) (name : StreamName) : List SubId
+def rtOp, rtRegister, rtCheck, rtResolve, rtEndFanOut, rtPull, rtWake, rtCloseA, rtCloseB   -- as in Runtime.lean
+def rtStep (s : RtState) : RtLabel → Option RtState
+def RtNext (s : RtState) (l : RtLabel) (s' : RtState) : Prop := rtStep s l = some s'
+inductive ReachableRt : RtState → Prop | init | step
+-- RtTraces.lean
+structure RtTrace where name : String; steps : List RtLabel; finalHistories : List (SubId × History)
+def runRtSteps : RtState → List RtLabel → Option RtState
+def finalRt (t : RtTrace) : RtState
+def runRtTrace (t : RtTrace) : Bool
+def runLabels : SubState → List Label → Option SubState
+def allRtTraces : List RtTrace          -- caseBefore, caseBetween, caseAfter, counterexample
+-- Sim.lean
+def rtSerial : List RtLabel → List Label
+def labelSerial : List Label → List Label
+def abstractHistoryFrom (id : SubId) : SubState → History → List Label → Option History
+def abstractHistory (labels : List Label) (id : SubId) : Option History
+def A4Inclusion : Prop      -- as in Sim.lean (serial sequence, chunk histories, subscriber counts)
+def A4Complete : Prop       -- as in Sim.lean (membership in historiesWith apply t id)
+-- SubPlacements.lean (r3.2 definitions now read by frozen statements)
+abbrev History := List (List Observed)
+def appended, afterLabel, pullsAtGap, outcomesFrom, historiesFrom, subIds, labelsWithoutPulls,
+    historiesWith, placementsOf, terminalPlacementsOf, gatedHistory
+-- RtInvariants.lean (proof-side predicate whose clauses are frozen, like SubInv)
+structure QueueInv (cap : Nat) (q : EffectQueue) : Prop  -- takerLive, doneEmpty, closingNonempty, shutDownClear, capacity
+structure RtSubInv (s : RtState) (r : RtSubscriber) : Prop -- capacityPos, queue, registeredOpen, closeStartedOpen, registeredStream
+structure FanOutInv (s : RtState) (f : FanOut) : Prop    -- remainingNodup, remainingKnown, decidedNotRemaining, decidedKnown, decidedRoom
+structure RtInv (s : RtState) : Prop                     -- subs, shape, fanOut, core
+```
+
+### Theorem statements (frozen with r4)
+
+Stated in the named modules; proof bodies and proved helper lemmas are the only edits allowed.
+
+```lean
+-- EffectQueueLaws.lean (SB1: Q1–Q3 as theorems)
+theorem takeAll_drains (q : EffectQueue) (h : q.status = .opened) (hne : q.buffer ≠ []) :
+    q.takeAll = ({ q with buffer := [] }, .chunk q.buffer)
+theorem takeAll_closing (q : EffectQueue) (e : SubError) (h : q.status = .closing e) (hne : q.buffer ≠ []) :
+    q.takeAll = ({ q with buffer := [], status := .done e }, .chunk q.buffer)
+theorem fail_empty (q : EffectQueue) (e : SubError) (h : q.status = .opened) (hb : q.buffer = []) :
+    q.fail e = { q with status := .done e }
+theorem fail_nonempty (q : EffectQueue) (e : SubError) (h : q.status = .opened) (hb : q.buffer ≠ []) :
+    q.fail e = { q with status := .closing e }
+theorem exit_after_drain (q : EffectQueue) (e : SubError) (h : q.status = .done e) :
+    q.takeAll = ({ q with status := .shutDown }, .exit e)
+theorem shutdown_clears (q : EffectQueue) : q.shutdown.buffer = [] ∧ q.shutdown.status = .shutDown
+theorem size_eq_length (q : EffectQueue) (h : q.status = .opened ∨ ∃ e, q.status = .closing e) :
+    q.size = q.buffer.length
+theorem offer_admits (cap : Nat) (q : EffectQueue) (m : StoredMessage) (h : q.status = .opened)
+    (hr : q.buffer.length < cap) : q.offer cap m = ({ q with buffer := q.buffer ++ [m] }, .accepted)
+theorem offer_refused (cap : Nat) (q : EffectQueue) (m : StoredMessage) (h : q.status ≠ .opened) :
+    q.offer cap m = (q, .refused)
+
+-- RtCommute.lean (SB2)
+def bindStep (s : RtState) (a b : RtLabel) : Option RtState := (rtStep s a).bind (fun s' => rtStep s' b)
+theorem commute_consumer_publisher (s : RtState) (hinv : RtInv s) (i j : SubId) (hij : i ≠ j)
+    (c p : RtLabel) (hc : c = .pull j ∨ c = .wake j ∨ c = .closeA j ∨ c = .closeB j)
+    (hp : p = .check i ∨ p = .resolve i) : bindStep s c p = bindStep s p c
+theorem commute_consumers (s : RtState) (hinv : RtInv s) (i j : SubId) (hij : i ≠ j)
+    (c c' : RtLabel) (hc : c = .pull i ∨ c = .wake i ∨ c = .closeA i ∨ c = .closeB i)
+    (hc' : c' = .pull j ∨ c' = .wake j ∨ c' = .closeA j ∨ c' = .closeB j) : bindStep s c c' = bindStep s c' c
+
+-- RtReachable.lean (SB3, SB6, SB7)
+theorem rtInv_reachable {s : RtState} (h : ReachableRt s) : RtInv s
+theorem core_frame {s s' : RtState} {l : RtLabel} (h : rtStep s l = some s') (hl : ∀ o e, l ≠ .op o e) :
+    s'.core = s.core
+theorem core_reachable {s : RtState} (h : ReachableRt s) : Reachable s.core
+theorem pending_le_capacity_rt {s : RtState} (h : ReachableRt s) :
+    ∀ p ∈ s.subs, p.2.queue.buffer.length ≤ p.2.policy.capacity
+
+-- SimProof.lean (SB4, SB5)
+theorem a4_inclusion : A4Inclusion
+theorem a4_complete : A4Complete
+```
+
+Witnesses already proved (`RtTraces.lean`, `Sim.lean`, frozen names): `rt_before_trace`,
+`rt_between_trace`, `rt_after_trace`, `rt_counterexample_trace`, `rt_cases_admitted`,
+`rt_counterexample_admitted`, `wrong_linearization_differs`, `right_linearization_agrees`,
+`all_rt_traces`, `counterexample_inclusion_witness`, `counterexample_wrong_witness`.
+
+Approved edit regions after this freeze: the four new proof modules named above and proved
+helper lemmas anywhere under `EffectNatsSubstrate/`; a change to any declaration listed here
+returns to the slice document with an old/new entry in the statement revision log below.
+Axiom policy unchanged (`propext`, `Classical.choice`, `Quot.sound`); no `set_option`; `decide`
+only on concrete data.
+
+### Statement revision log (r4)
+
+- 2026-08-23, at the freeze: the Pass B probes changed three definitions before any statement
+  was frozen (`EffectQueue.wake` on `closing`; `EffectQueue.offer` capacity-aware with
+  `wouldSuspend`; `rtPull`/`rtWake` disabled once `closeStarted`), and four draft `RtInv`
+  clauses (the parked-taker clause, `closeStartedOpen`, the overflow-decision clause dropped,
+  `registeredStream` exempting a deletion fan-out); `A4Inclusion` gained the subscriber-count
+  conjunct; the cslib `IsSimulation` block was removed from `Sim.lean` (not a statement). None of
+  these is a post-freeze change.

@@ -35,7 +35,9 @@ inductive Outcome where
   deriving Repr, DecidableEq
 
 inductive FanKind where
-  | publish (stream : StreamName) (m : StoredMessage)
+  /-- The stored message and the publish's `expectedLastSubjectSequence`, so
+  the abstract label can be rebuilt exactly. -/
+  | publish (stream : StreamName) (m : StoredMessage) (expectedLast : Option StreamSeq)
   | delete (name : StreamName)
   deriving Repr, DecidableEq
 
@@ -141,12 +143,12 @@ def rtOp (s : RtState) (o : Op) (e : Expect) : Option RtState :=
       if r ≠ r' then none
       else
         match o, r with
-        | .publish stream subject payload headers _ now, .sequence seq =>
+        | .publish stream subject payload headers expected? now, .sequence seq =>
           let m : StoredMessage :=
             { subject := subject, sequence := seq, payload := payload, headers := headers,
               timestampMillis := now }
           some { s with core := core'
-                        fanOut := some { kind := .publish stream m
+                        fanOut := some { kind := .publish stream m expected?
                                          remaining := fanOutIds s stream subject
                                          decided := none, visited := [] } }
         | .deleteStream name, _ =>
@@ -178,7 +180,7 @@ def rtCheck (s : RtState) (id : SubId) : Option RtState :=
   match s.fanOut with
   | some f =>
     match f.kind, f.decided, f.remaining with
-    | .publish _ _, none, i :: rest =>
+    | .publish _ _ _, none, i :: rest =>
       if i ≠ id then none
       else
         match lookupRt s.subs id with
@@ -195,7 +197,7 @@ def rtResolve (s : RtState) (id : SubId) : Option RtState :=
   | none => none
   | some f =>
     match f.kind with
-    | .publish stream m =>
+    | .publish stream m _ =>
       match f.decided with
       | some (i, overflow) =>
         if i ≠ id then none
@@ -210,12 +212,16 @@ def rtResolve (s : RtState) (id : SubId) : Option RtState :=
                             fanOut := some { f with decided := none
                                                     visited := f.visited ++ [(id, .overflowed)] } }
             else
-              let (q', ok) := r.queue.offer m
-              let r' := { r with queue := q', lastEnqueued := m.sequence }
-              some { s with subs := updateRt s.subs id (fun _ => r')
-                            fanOut := some { f with decided := none
-                                                    visited := f.visited ++
-                                                      [(id, if ok then .admitted else .skipped)] } }
+              let (q', res) := r.queue.offer r.policy.capacity m
+              match res with
+              | .wouldSuspend => none
+              | _ =>
+                let r' := { r with queue := q', lastEnqueued := m.sequence }
+                some { s with subs := updateRt s.subs id (fun _ => r')
+                              fanOut := some { f with decided := none
+                                                      visited := f.visited ++
+                                                        [(id, if res = .accepted then .admitted
+                                                              else .skipped)] } }
       | none => none
     | .delete name =>
       match f.decided, f.remaining with
@@ -246,7 +252,9 @@ def rtPull (s : RtState) (id : SubId) : Option RtState :=
   match lookupRt s.subs id with
   | none => none
   | some r =>
-    if r.queue.taker || r.queue.status = .shutDown then none
+    -- the scope-closure finalizers run only once the consumer fiber has stopped
+    -- (the stream ended or the fiber was interrupted), so no pull follows `closeA`
+    if r.queue.taker || r.queue.status = .shutDown || r.closeStarted then none
     else
       let (q', res) := r.queue.takeAll
       match res with
@@ -261,6 +269,7 @@ def rtWake (s : RtState) (id : SubId) : Option RtState :=
   match lookupRt s.subs id with
   | none => none
   | some r =>
+    if r.closeStarted then none else
     match r.queue.wake with
     | none => none
     | some (q', res) =>
