@@ -165,13 +165,10 @@ theorem pull_visible {s s' : SubState} {id : SubId} {sub sub' : Subscriber}
     have ha' : lookupSub (updateSub s.subs id (fun _ => sub₁)) id = some sub' := ha
     rw [lookupSub_updateSub_self _ hb] at ha'
     cases ha'
-    unfold pullStep at hpull
-    rw [ho] at hpull
-    simp only at hpull
-    split at hpull
-    · cases hpull
-    · cases hpull
-      simp [visible]
+    rcases pullStep_ok_eq hpull with ⟨e, hst, heq⟩ | ⟨_, _, heq⟩ | ⟨e, hst, _, heq⟩
+    · rw [hst] at ho; cases ho
+    · rw [heq]; exact visible_drain sub
+    · rw [hst] at ho; cases ho
 
 theorem publish_visible {s : SubState} {stream : StreamName} {subject : SubjectName}
     {payload : PayloadHash} {headers : List (String × String)} {x : Option StreamSeq} {now : Nat}
@@ -372,11 +369,8 @@ theorem lagInv_endOne {name : StreamName} {sub : Subscriber} (hl : LagInv sub) :
 
 theorem lagInv_pullStep {s : SubState} {sub sub' : Subscriber} (hinv : SubInv s sub)
     (hl : LagInv sub) (h : pullStep sub = some sub') : LagInv sub' := by
-  unfold pullStep at h
-  split at h
-  · cases h
-  · rename_i e hst
-    cases h
+  rcases pullStep_ok_eq h with ⟨e, hst, heq⟩ | ⟨hopen, hne', heq⟩ | ⟨e, hst, hne', heq⟩
+  · rw [heq]
     refine ⟨?_, ?_, ?_⟩
     · intro stream' n' h'; cases h'
     · intro stream' n' h'; cases h'
@@ -389,53 +383,43 @@ theorem lagInv_pullStep {s : SubState} {sub sub' : Subscriber} (hinv : SubInv s 
         = some n'
       rw [entrySequences_append, entrySequences_failed, List.append_nil]
       exact hl.doneLag stream' n' hst
-  · rename_i hst
-    split at h
-    · cases h
-    · rename_i hne
-      cases h
-      have hne' : sub.pending ≠ [] := fun hnil => hne (List.isEmpty_iff.mpr hnil)
-      refine ⟨?_, ?_, ?_⟩
-      · intro stream' n' h'
-        have h'' : sub.status = .closing (.consumerLagged stream' n') := h'
-        rw [hst] at h''
-        cases h''
-      · intro stream' n' h'
-        have h'' : sub.status = .done (.consumerLagged stream' n') := h'
-        rw [hst] at h''
-        cases h''
-      · intro stream' n' h'
-        exfalso
-        have h'' : (sub.observed ++ sub.pending.map Observed.entry).getLast?
-            = some (.failed (.consumerLagged stream' n')) := h'
-        rw [List.getLast?_append, List.getLast?_map] at h''
-        cases hlast : sub.pending.getLast? with
-        | none => exact hne' (List.getLast?_eq_none_iff.mp hlast)
-        | some x => rw [hlast] at h''; simp at h''
-  · rename_i e hst
-    split at h
-    · cases h
-    · rename_i hne
-      cases h
-      have hne' : sub.pending ≠ [] := fun hnil => hne (List.isEmpty_iff.mpr hnil)
-      refine ⟨?_, ?_, ?_⟩
-      · intro stream' n' h'; cases h'
-      · intro stream' n' h'
-        have h'' : QueueStatus.done e = .done (.consumerLagged stream' n') := h'
-        cases h''
-        show (entrySequences (sub.observed ++ sub.pending.map Observed.entry)).getLast? = some n'
-        rw [entrySequences_append, entrySequences_map_entry, List.getLast?_append,
-          hinv.pendingLast hne']
-        show some sub.lastEnqueued = some n'
-        rw [hl.closingLag stream' n' hst]
-      · intro stream' n' h'
-        exfalso
-        have h'' : (sub.observed ++ sub.pending.map Observed.entry).getLast?
-            = some (.failed (.consumerLagged stream' n')) := h'
-        rw [List.getLast?_append, List.getLast?_map] at h''
-        cases hlast : sub.pending.getLast? with
-        | none => exact hne' (List.getLast?_eq_none_iff.mp hlast)
-        | some x => rw [hlast] at h''; simp at h''
+  · rw [heq]
+    refine ⟨?_, ?_, ?_⟩
+    · intro stream' n' h'
+      have h'' : sub.status = .closing (.consumerLagged stream' n') := h'
+      rw [hopen] at h''
+      cases h''
+    · intro stream' n' h'
+      have h'' : sub.status = .done (.consumerLagged stream' n') := h'
+      rw [hopen] at h''
+      cases h''
+    · intro stream' n' h'
+      exfalso
+      have h'' : (sub.observed ++ sub.pending.map Observed.entry).getLast?
+          = some (.failed (.consumerLagged stream' n')) := h'
+      rw [List.getLast?_append, List.getLast?_map] at h''
+      cases hlast : sub.pending.getLast? with
+      | none => exact hne' (List.getLast?_eq_none_iff.mp hlast)
+      | some x => rw [hlast] at h''; simp at h''
+  · rw [heq]
+    refine ⟨?_, ?_, ?_⟩
+    · intro stream' n' h'; cases h'
+    · intro stream' n' h'
+      have h'' : QueueStatus.done e = .done (.consumerLagged stream' n') := h'
+      cases h''
+      show (entrySequences (sub.observed ++ sub.pending.map Observed.entry)).getLast? = some n'
+      rw [entrySequences_append, entrySequences_map_entry, List.getLast?_append,
+        hinv.pendingLast hne']
+      show some sub.lastEnqueued = some n'
+      rw [hl.closingLag stream' n' hst]
+    · intro stream' n' h'
+      exfalso
+      have h'' : (sub.observed ++ sub.pending.map Observed.entry).getLast?
+          = some (.failed (.consumerLagged stream' n')) := h'
+      rw [List.getLast?_append, List.getLast?_map] at h''
+      cases hlast : sub.pending.getLast? with
+      | none => exact hne' (List.getLast?_eq_none_iff.mp hlast)
+      | some x => rw [hlast] at h''; simp at h''
 
 theorem lagInv_unsubscribe {sub : Subscriber} (hl : LagInv sub) :
     LagInv { sub with registered := false, pending := [], status := .shutDown } := by

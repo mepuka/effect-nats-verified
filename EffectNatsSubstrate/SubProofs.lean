@@ -157,45 +157,66 @@ theorem registered_false_of_status {s : SubState} {sub : Subscriber} (hinv : Sub
   | false => rfl
   | true => exact absurd (hinv.registeredOpen hr) hne
 
-theorem pullStep_inv {s : SubState} {sub sub' : Subscriber} (hinv : SubInv s sub)
-    (h : pullStep sub = some sub') : SubInv s sub' := by
+/-- The four arms of a successful pull: failure-after-done, an opened drain, or a
+closing drain that finishes. -/
+theorem pullStep_ok_eq {sub sub' : Subscriber} (h : pullStep sub = some sub') :
+    (∃ e, sub.status = .done e ∧
+        sub' = { sub with observed := sub.observed ++ [.failed e], status := .shutDown })
+    ∨ (sub.status = .opened ∧ sub.pending ≠ [] ∧
+        sub' = { sub with observed := sub.observed ++ sub.pending.map Observed.entry,
+                          pending := [] })
+    ∨ (∃ e, sub.status = .closing e ∧ sub.pending ≠ [] ∧
+        sub' = { sub with observed := sub.observed ++ sub.pending.map Observed.entry,
+                          pending := [], status := .done e }) := by
   unfold pullStep at h
   split at h
   · cases h
   · rename_i e hst
     cases h
+    exact Or.inl ⟨e, hst, rfl⟩
+  · rename_i hst
+    split at h
+    · cases h
+    · rename_i hne
+      cases h
+      exact Or.inr (Or.inl ⟨hst, fun hnil => hne (List.isEmpty_iff.mpr hnil), rfl⟩)
+  · rename_i e hst
+    split at h
+    · cases h
+    · rename_i hne
+      cases h
+      exact Or.inr (Or.inr ⟨e, hst, fun hnil => hne (List.isEmpty_iff.mpr hnil), rfl⟩)
+
+theorem pullStep_inv {s : SubState} {sub sub' : Subscriber} (hinv : SubInv s sub)
+    (h : pullStep sub = some sub') : SubInv s sub' := by
+  rcases pullStep_ok_eq h with ⟨e, hst, heq⟩ | ⟨hopen, _, heq⟩ | ⟨e, hst, _, heq⟩
+  · rw [heq]
     have hpend : sub.pending = [] := hinv.doneEmpty e hst
     have hreg : sub.registered = false :=
       registered_false_of_status hinv (by rw [hst]; intro h'; cases h')
     exact SubInv.pulled hinv hpend rfl rfl (entrySequences_visible_fail sub e)
       (fun hr => absurd hr (by simp [hreg])) (fun _ he => by simp at he) (fun _ => hreg)
       hinv.registeredStream
-  · rename_i hst
-    split at h
-    · cases h
-    · cases h
-      refine SubInv.pulled hinv rfl rfl rfl (congrArg entrySequences (visible_drain sub))
-        hinv.registeredOpen ?_ ?_ hinv.registeredStream
-      · intro e' he'
-        have h'' : sub.status = .closing e' := he'
-        simp [hst] at h''
-      · intro h'
-        have h'' : sub.status = .shutDown := h'
-        simp [hst] at h''
-  · rename_i e hst
-    split at h
-    · cases h
-    · cases h
-      have hreg : sub.registered = false :=
-        registered_false_of_status hinv (by rw [hst]; intro h'; cases h')
-      refine SubInv.pulled hinv rfl rfl rfl (congrArg entrySequences (visible_drain_done sub e))
-        (fun hr => absurd hr (by simp [hreg])) ?_ ?_ hinv.registeredStream
-      · intro e' he'
-        have h'' : QueueStatus.done e = .closing e' := he'
-        simp at h''
-      · intro h'
-        have h'' : QueueStatus.done e = .shutDown := h'
-        simp at h''
+  · rw [heq]
+    refine SubInv.pulled hinv rfl rfl rfl (congrArg entrySequences (visible_drain sub))
+      hinv.registeredOpen ?_ ?_ hinv.registeredStream
+    · intro e' he'
+      have h'' : sub.status = .closing e' := he'
+      simp [hopen] at h''
+    · intro h'
+      have h'' : sub.status = .shutDown := h'
+      simp [hopen] at h''
+  · rw [heq]
+    have hreg : sub.registered = false :=
+      registered_false_of_status hinv (by rw [hst]; intro h'; cases h')
+    refine SubInv.pulled hinv rfl rfl rfl (congrArg entrySequences (visible_drain_done sub e))
+      (fun hr => absurd hr (by simp [hreg])) ?_ ?_ hinv.registeredStream
+    · intro e' he'
+      have h'' : QueueStatus.done e = .closing e' := he'
+      simp at h''
+    · intro h'
+      have h'' : QueueStatus.done e = .shutDown := h'
+      simp at h''
 
 theorem unsubscribe_inv {s : SubState} {sub : Subscriber} (hinv : SubInv s sub) :
     SubInv s { sub with registered := false, pending := [], status := .shutDown } := by

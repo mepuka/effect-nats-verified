@@ -528,35 +528,24 @@ theorem histInv_pull {sH : SubStateH} {id : SubId} {base' : SubState} (hsinv : S
         rw [hpid, hp2]
         refine ⟨r, hr, hat, ?_, ?_⟩
         · intro hreg
-          unfold pullStep at hpull
-          split at hpull
-          · cases hpull
-          · rename_i e hst
-            cases hpull
+          rcases pullStep_ok_eq hpull with ⟨e, hps, hpeq⟩ | ⟨_, _, hpeq⟩ | ⟨e, hps, _, hpeq⟩
+          · subst hpeq
             have hreg' : sub.registered = true := hreg
             have ho := hsubinv.registeredOpen hreg'
-            rw [hst] at ho
+            rw [hps] at ho
             cases ho
-          · split at hpull
-            · cases hpull
-            · cases hpull
-              have hreg' : sub.registered = true := hreg
-              rw [visible_drain]
-              exact heq hreg'
-          · rename_i e hst
-            split at hpull
-            · cases hpull
-            · cases hpull
-              have hreg' : sub.registered = true := hreg
-              have ho := hsubinv.registeredOpen hreg'
-              rw [hst] at ho
-              cases ho
+          · subst hpeq
+            have hreg' : sub.registered = true := hreg
+            rw [visible_drain]
+            exact heq hreg'
+          · subst hpeq
+            have hreg' : sub.registered = true := hreg
+            have ho := hsubinv.registeredOpen hreg'
+            rw [hps] at ho
+            cases ho
         · intro m hm
-          unfold pullStep at hpull
-          split at hpull
-          · cases hpull
-          · rename_i e hst
-            cases hpull
+          rcases pullStep_ok_eq hpull with ⟨e, hps, hpeq⟩ | ⟨_, _, hpeq⟩ | ⟨e, hps, _, hpeq⟩
+          · subst hpeq
             have hm' : Observed.entry m ∈ (sub.observed ++ [Observed.failed e]) ++
                 sub.pending.map Observed.entry := hm
             rcases List.mem_append.mp hm' with hobs | hpend
@@ -565,17 +554,12 @@ theorem histInv_pull {sH : SubStateH} {id : SubId} {base' : SubState} (hsinv : S
               · rw [List.mem_singleton] at hf
                 cases hf
             · exact hent m (List.mem_append.mpr (Or.inr hpend))
-          · split at hpull
-            · cases hpull
-            · cases hpull
-              rw [visible_drain] at hm
-              exact hent m hm
-          · rename_i e hst
-            split at hpull
-            · cases hpull
-            · cases hpull
-              rw [visible_drain_done] at hm
-              exact hent m hm
+          · subst hpeq
+            rw [visible_drain] at hm
+            exact hent m hm
+          · subst hpeq
+            rw [visible_drain_done] at hm
+            exact hent m hm
 
 theorem histInv_unsubscribe {sH : SubStateH} {id : SubId} {base' : SubState}
     (hinv : HistInv sH) (hx : apply sH.base (.unsubscribe id) = some base') :
