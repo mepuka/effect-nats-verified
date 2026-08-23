@@ -217,6 +217,20 @@ theorem histInv_create {sH : SubStateH} {raw : RawStreamConfig} {core' : JSState
     · rw [lookupStream_insertStream_other _ _ _ _ (Ne.symm hn)] at hl
       exact hinv.coreCommitted stream st hl m hm
 
+/-- Read-only operations (`getStream`, `lastMessageForSubject`) preserve the history record:
+same core messages, same subscribers, same registers. -/
+theorem histInv_readonly {sH : SubStateH} {o : Op} {core' : JSState} {r : Ret}
+    (hinv : HistInv sH) (hsame : core' = sH.base.core)
+    (hafter : afterOp deliverOne sH.base core' o r = { sH.base with core := core' })
+    (hc : committedAfter sH (.op o (.ok r)) = sH.committed)
+    (hr : regsAfter sH (.op o (.ok r)) = sH.regs) :
+    HistInv { base := afterOp deliverOne sH.base core' o r,
+              committed := committedAfter sH (.op o (.ok r)),
+              regs := regsAfter sH (.op o (.ok r)) } := by
+  subst hsame
+  rw [hafter, hc, hr]
+  exact histInv_of_same hinv hinv.coreCommitted rfl rfl
+
 theorem histInv_get {sH : SubStateH} {name : StreamName} {core' : JSState} {r : Ret}
     (hinv : HistInv sH) (hstep : step sH.base.core (.getStream name) = .ok (core', r)) :
     HistInv { base := afterOp deliverOne sH.base core' (.getStream name) r,
@@ -224,9 +238,7 @@ theorem histInv_get {sH : SubStateH} {name : StreamName} {core' : JSState} {r : 
               regs := regsAfter sH (.op (.getStream name) (.ok r)) } := by
   have hg : getStep sH.base.core name = .ok (core', r) := hstep
   obtain rfl := getStep_ok_eq hg
-  show HistInv { base := { sH.base with core := sH.base.core }, committed := sH.committed,
-                 regs := sH.regs }
-  exact histInv_of_same hinv hinv.coreCommitted rfl rfl
+  exact histInv_readonly hinv rfl rfl rfl rfl
 
 theorem histInv_last {sH : SubStateH} {stream : StreamName} {subject : SubjectName}
     {core' : JSState} {r : Ret}
@@ -237,9 +249,7 @@ theorem histInv_last {sH : SubStateH} {stream : StreamName} {subject : SubjectNa
               regs := regsAfter sH (.op (.lastMessageForSubject stream subject) (.ok r)) } := by
   have hg : lastMsgStep sH.base.core stream subject = .ok (core', r) := hstep
   obtain rfl := lastMsgStep_ok_eq hg
-  show HistInv { base := { sH.base with core := sH.base.core }, committed := sH.committed,
-                 regs := sH.regs }
-  exact histInv_of_same hinv hinv.coreCommitted rfl rfl
+  exact histInv_readonly hinv rfl rfl rfl rfl
 
 theorem histInv_delete {sH : SubStateH} {name : StreamName} {core' : JSState} {r : Ret}
     (hinv : HistInv sH) (hstep : step sH.base.core (.deleteStream name) = .ok (core', r)) :
