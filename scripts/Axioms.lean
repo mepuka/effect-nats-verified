@@ -199,3 +199,10 @@ open EffectNatsSubstrate
 #print axioms size_eq_length
 #print axioms offer_admits
 #print axioms offer_refused
+#print axioms lookupSub_updateSub_ne
+#print axioms applyPull_other
+#print axioms applyUnsubscribe_other
+#print axioms applyOp_publish_each
+#print axioms applyOp_delete_each
+#print axioms applyOp_other_frame
+#print axioms applyOp_error_frame

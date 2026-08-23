@@ -24,5 +24,6 @@ import EffectNatsSubstrate.SubInvariants
 import EffectNatsSubstrate.SubCore
 import EffectNatsSubstrate.SubProofs
 import EffectNatsSubstrate.SubReachable
+import EffectNatsSubstrate.ApplyLemmas
 import EffectNatsSubstrate.SubStatements
 import EffectNatsSubstrate.SubHistory
