@@ -393,7 +393,8 @@ theorem lagged_carries_last_observed {s : SubState} (h : ReachableSub s) :
 Witnesses: the eight traces of `SubTraces.lean` (C7–C10, C13–C15, M1, and the Q1 witness);
 counterexamples: W1 (one-element pull) and W2 (advance on overflow) through the same runner.
 Approved edit regions after ratification: proof bodies in `SubProofs.lean`, `SubReachable.lean`,
-`SubStatements.lean` and proved helper lemmas; changing any declaration above or a statement
+`SubStatements.lean`, and — since the cleanup lane moved helper lemmas there — `SubCore.lean` and
+`SubHistory.lean`, plus proved helper lemmas; changing any declaration above or a statement
 returns to the slice document.
 
 ### Statement revision log (r3 proposed → r3.1 ratified)
