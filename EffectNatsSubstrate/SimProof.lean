@@ -3,6 +3,7 @@ import EffectNatsSubstrate.ApplyLemmas
 import EffectNatsSubstrate.SimAgree
 import EffectNatsSubstrate.EffectQueueLaws
 import EffectNatsSubstrate.RtInvariants
+import EffectNatsSubstrate.RtReachable
 import EffectNatsSubstrate.RtList
 
 /-!
@@ -3633,6 +3634,15 @@ theorem a4_inclusion_pullOnly_of_rtInv
   | register _ _ _ _ _ => rfl
   | pull _ => rfl
   | unsubscribe j => exact absurd rfl (hnu _ hl j)
+
+
+/-! ## The frozen statement -/
+
+/-- **A4 as trace inclusion at quiescent points** (SB4), closed: `a4_inclusion_of_rtInv` needed
+one fact about reachable runtime states, and `rtInv_reachable` (P2) is it. -/
+theorem a4_inclusion : A4Inclusion :=
+  a4_inclusion_of_rtInv
+    (fun rls _s hrun => rtInv_reachable (reachableRt_of_run rls ReachableRt.init hrun))
 
 
 end EffectNatsSubstrate

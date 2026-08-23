@@ -463,3 +463,5 @@ open EffectNatsSubstrate
 #print axioms rtSubInv_state
 #print axioms rtWake_invAux
 #print axioms step_keeps_bound
+#print axioms a4_inclusion
+#print axioms a4_complete
