@@ -72,6 +72,19 @@ theorem publishBase_sublist (st : StreamState) (subject : SubjectName) (rollup :
   · exact List.filter_sublist
   · exact List.Sublist.refl _
 
+/-- A stored message after a commit was stored before, or is the committed one. -/
+theorem mem_applyPublish {st : StreamState} {subject : SubjectName} {payload : PayloadHash}
+    {headers : List (String × String)} {rollup : Bool} {now : Nat} {m : StoredMessage}
+    (h : m ∈ (applyPublish st subject payload headers rollup now).1.messages) :
+    m ∈ st.messages ∨ m = newMessage st subject payload headers now := by
+  simp only [applyPublish] at h
+  rcases List.mem_append.mp
+      ((pruneSubject_sublist
+        (publishBase st subject rollup ++ [newMessage st subject payload headers now])
+        subject st.config.maxMessagesPerSubject).subset h) with hold | hnew
+  · exact Or.inl ((publishBase_sublist st subject rollup).subset hold)
+  · exact Or.inr (List.mem_singleton.mp hnew)
+
 /-! ## Association-list lemmas -/
 
 theorem lookup_mem : ∀ {s : JSState} {name : StreamName} {st : StreamState},
@@ -498,13 +511,9 @@ theorem reachable_positive {s : JSState} {name : StreamName} {st : StreamState}
     (fun st subject payload headers rollup now hst => by
       refine ⟨Nat.succ_pos _, ?_⟩
       intro m hm
-      simp only [applyPublish] at hm
-      have hsub := pruneSubject_sublist
-        (publishBase st subject rollup ++ [newMessage st subject payload headers now])
-        subject st.config.maxMessagesPerSubject
-      cases List.mem_append.mp (hsub.subset hm) with
-      | inl h => exact hst.2 m ((publishBase_sublist st subject rollup).subset h)
-      | inr h => rw [List.mem_singleton.mp h]; exact hst.1)
+      rcases mem_applyPublish hm with hold | hnew
+      · exact hst.2 m hold
+      · rw [hnew]; exact hst.1)
     hr _ (lookup_mem hl)
 
 /-- T6, bound: a positive `maxMessagesPerSubject` bounds every subject's

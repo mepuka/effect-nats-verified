@@ -320,14 +320,9 @@ theorem histInv_publish {sH : SubStateH} {stream : StreamName} {subject : Subjec
     · subst hn
       rw [lookupStream_updateStream_self _ _ _ _ hl] at hl'
       cases hl'
-      simp only [applyPublish] at hm
-      have hsub := (pruneSubject_sublist
-        (publishBase st subject (isRollup headers) ++ [newMessage st subject payload headers now])
-        subject st.config.maxMessagesPerSubject).subset hm
-      rcases List.mem_append.mp hsub with hold | hnew
-      · exact List.mem_append.mpr
-          (Or.inl (hinv.coreCommitted stream' st hl m ((publishBase_sublist st subject _).subset hold)))
-      · rw [List.mem_singleton.mp hnew]
+      rcases mem_applyPublish hm with hold | hnew
+      · exact List.mem_append.mpr (Or.inl (hinv.coreCommitted stream' st hl m hold))
+      · rw [hnew]
         exact List.mem_append.mpr (Or.inr (List.mem_singleton.mpr rfl))
     · rw [lookupStream_updateStream_other _ _ _ _ hn] at hl'
       exact List.mem_append.mpr (Or.inl (hinv.coreCommitted stream' st' hl' m hm))
