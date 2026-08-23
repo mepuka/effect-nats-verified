@@ -42,7 +42,8 @@ def appended (before after : SubState) (id : SubId) : List Observed :=
 /-- Up to `fuel` further pulls of `id` at the current gap; `k` continues from
 each intermediate state (including the one with no pull). -/
 def pullsAtGap (applyFn : SubState → Label → Option SubState) (id : SubId) :
-    Nat → SubState → History → (SubState → History → List History) → List History
+    Nat → SubState → History → (SubState → History → List (History × SubState)) →
+    List (History × SubState)
   | 0, s, h, k => k s h
   | fuel + 1, s, h, k =>
     k s h ++
@@ -58,19 +59,24 @@ def afterLabel (before after : SubState) (id : SubId) (h : History) : Label → 
   | _ => h
 
 /-- Every history of `id` over the labels, with up to two pulls of `id` inserted
-at every gap and after the last label; the labels themselves are applied as
-written. -/
-def historiesFrom (applyFn : SubState → Label → Option SubState) (id : SubId) :
-    SubState → History → List Label → List History
-  | s, h, [] => pullsAtGap applyFn id 2 s h (fun _ h' => [h'])
+at every gap and after the last label, paired with the final state; the labels
+themselves are applied as written. -/
+def outcomesFrom (applyFn : SubState → Label → Option SubState) (id : SubId) :
+    SubState → History → List Label → List (History × SubState)
+  | s, h, [] => pullsAtGap applyFn id 2 s h (fun s' h' => [(h', s')])
   | s, h, l :: rest =>
     pullsAtGap applyFn id 2 s h (fun s' h' =>
       match applyFn s' l with
-      | some s'' => historiesFrom applyFn id s'' (afterLabel s' s'' id h' l) rest
+      | some s'' => outcomesFrom applyFn id s'' (afterLabel s' s'' id h' l) rest
       | none =>
         match l with
-        | .unsubscribe i => if i = id then historiesFrom applyFn id s' h' rest else []
+        | .unsubscribe i => if i = id then outcomesFrom applyFn id s' h' rest else []
         | _ => [])
+
+/-- The histories alone. -/
+def historiesFrom (applyFn : SubState → Label → Option SubState) (id : SubId)
+    (s : SubState) (h : History) (labels : List Label) : List History :=
+  (outcomesFrom applyFn id s h labels).map Prod.fst
 
 /-- The subscribers a trace registers, in registration order. -/
 def subIds (t : SubTrace) : List SubId :=
@@ -92,6 +98,14 @@ def historiesWith (applyFn : SubState → Label → Option SubState) (t : SubTra
 exporter prints. -/
 def placementsOf (t : SubTrace) (id : SubId) : List History :=
   (historiesWith apply t id).eraseDups
+
+/-- The histories after which no pull of `id` is enabled: a free-running
+consumer that reaches quiescence without being interrupted must end in one of
+these, not merely in a prefix of one (the acceptance set is closed under chunk
+prefix, since "no further pull" is a placement). -/
+def terminalPlacementsOf (t : SubTrace) (id : SubId) : List History :=
+  ((outcomesFrom apply id initialSub [] (labelsWithoutPulls t id)).filter
+    (fun p => (apply p.2 (.pull id)).isNone)).map Prod.fst |>.eraseDups
 
 /-- The gated history a trace records for `id`: the `events` of its
 registration and of each of its pulls, in order — what the gated harness mode

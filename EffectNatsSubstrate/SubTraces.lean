@@ -323,9 +323,39 @@ def saDrain : SubTrace :=
 
 theorem sa_drain_trace : runSubTrace saDrain = true := by decide
 
+/-- Replay into a bounded buffer (added 2026-08-23, snapshot r3.2): three stored
+messages replayed under `TerminateOnLag 1`. The model replays a snapshot
+outside the queue, so registration does not lag; the live adapter replays
+through the subscription queue (`JetStreamLive.ts:491`, ADR-0008) and is
+expected to diverge here — the one override class no earlier trace could
+reach (overwatch F12). Then one admitted message, one overflow, the drain, and
+the failure carrying 4. -/
+def saReplayLag : SubTrace :=
+  { name := "sa-replay-lag"
+    mirrors := []
+    steps :=
+      [ create kvConfigRaw
+      , pub "KV_b" "$KV.b.k" "v1" 1 1
+      , pub "KV_b" "$KV.b.k" "v2" 2 2
+      , pub "KV_b" "$KV.b.k" "v3" 3 3
+      , reg "KV_b" (opts ["$KV.b.>"] .allHistory (.terminateOnLag 1)) 3 0
+          [ .entry (msg "$KV.b.k" 1 "v1" 1), .entry (msg "$KV.b.k" 2 "v2" 2)
+          , .entry (msg "$KV.b.k" 3 "v3" 3), .caughtUp ] [("KV_b", 1)]
+      , pub "KV_b" "$KV.b.k" "v4" 4 4
+      , { label := .op (.publish "KV_b" "$KV.b.k" "v5" [] none 5) (.ok (.sequence 5))
+          counts := [("KV_b", 0)] }
+      , pullE 0 [.entry (msg "$KV.b.k" 4 "v4" 4)]
+      , pullE 0 [.failed (.consumerLagged "KV_b" 4)] ]
+    finalObserved :=
+      [ (0, [ .entry (msg "$KV.b.k" 1 "v1" 1), .entry (msg "$KV.b.k" 2 "v2" 2)
+            , .entry (msg "$KV.b.k" 3 "v3" 3), .caughtUp, .entry (msg "$KV.b.k" 4 "v4" 4)
+            , .failed (.consumerLagged "KV_b" 4) ]) ] }
+
+theorem sa_replay_lag_trace : runSubTrace saReplayLag = true := by decide
+
 /-- Every stage-A trace, in fixture order. -/
 def allSubTraces : List SubTrace :=
-  [ saReplay, saStarts, saFilters, saDelete, saLag, saResume, saAccounting, saDrain ]
+  [ saReplay, saStarts, saFilters, saDelete, saLag, saResume, saAccounting, saDrain, saReplayLag ]
 
 theorem all_sub_traces : allSubTraces.all runSubTrace = true := by decide
 

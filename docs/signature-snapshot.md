@@ -46,6 +46,16 @@ proof bodies and proved helper lemmas may change freely.
   SA4d and the negative witnesses added, assumption A4 named. SA1–SA3 were proved while r3 was
   proposed — ahead of the slices plan's "frozen before proofs" gate; those proofs are evidence
   for the candidates, not of ratification.
+- **r3.2 (2026-08-23, addition; no statement changed).** A ninth stage-A trace `saReplayLag` /
+  `sa_replay_lag_trace` (`SubTraces.lean`): replay into a `TerminateOnLag 1` buffer, the one shape
+  that can reach the live adapter's replay-through-the-queue class (ADR-0008; overwatch finding
+  F12); `allSubTraces` gains it, so `all_sub_traces` and the `SubPlacements` theorems now cover
+  nine traces with unchanged statements. Non-frozen additions the same day: `SubPlacements.lean`
+  (acceptance sets `placementsOf`, `terminalPlacementsOf`; `gated_in_outcomes`,
+  `w1_outside_outcomes`, `w2_outside_outcomes`) and the stage-B1 modules `EffectQueue`,
+  `Runtime`, `RtTraces`, `Sim` (definitions and kernel-checked scenarios; their statements are
+  r4 candidates, frozen only at stage B's Pass B). The exporter's `--subscriber` mode prints
+  schema 2 with `freeRunning.outcomes` and `freeRunning.terminalOutcomes`.
 
 ## Carriers and transitions
 

@@ -207,7 +207,9 @@ def subTrace (t : SubTrace) : Json :=
         Json.mkObj [("id", toJson p.1), ("events", events p.2)])).toArray)
     , ("freeRunning", Json.mkObj
         [ ("outcomes", Json.mkObj ((subIds t).map (fun id =>
-            (toString id, Json.arr ((placementsOf t id).map history).toArray)))) ]) ]
+            (toString id, Json.arr ((placementsOf t id).map history).toArray))))
+        , ("terminalOutcomes", Json.mkObj ((subIds t).map (fun id =>
+            (toString id, Json.arr ((terminalPlacementsOf t id).map history).toArray)))) ]) ]
 
 def subFixture (foldableCommit : Option String) : Json :=
   Json.mkObj
