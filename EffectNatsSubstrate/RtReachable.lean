@@ -1,5 +1,6 @@
 import EffectNatsSubstrate.RtInvariants
 import EffectNatsSubstrate.RtList
+import EffectNatsSubstrate.SubCore
 import EffectNatsSubstrate.EffectQueueLaws
 import EffectNatsSubstrate.Proofs
 
@@ -745,7 +746,7 @@ theorem queueInv_fail {cap : Nat} {q : EffectQueue} (hq : QueueInv cap q) (e : S
       exact ⟨fun _ hc => QueueStatus.noConfusion hc, fun e' _ => List.isEmpty_iff.mp hb,
         fun e' he => QueueStatus.noConfusion he, fun hc => QueueStatus.noConfusion hc,
         hq.capacity⟩
-    · simp only [hb, if_false]
+    · simp only [hb]
       exact ⟨fun _ hc => QueueStatus.noConfusion hc, fun e' he => QueueStatus.noConfusion he,
         fun e' _ hnil => hb (by rw [show q.buffer = [] from hnil]; rfl),
         fun hc => QueueStatus.noConfusion hc, hq.capacity⟩
@@ -1187,5 +1188,399 @@ theorem rtResolve_invAux {s s' : RtState} {id : SubId}
                     · have hlk : lookupRt s.subs j = some rv :=
                         lookupRt_updateRt_neq s.subs i j _ hji hrv
                       exact others j rv hlk hr hs
+
+/-! ## `op` and `register` -/
+
+/-- Every successful operation but a deletion keeps a stream that exists, and keeps a sequence
+below its head below its head — the fact `registeredStream` needs across an `op`. -/
+theorem step_keeps_bound {c c' : JSState} {o : Op} {r : Ret} (hstep : step c o = .ok (c', r))
+    {stream : StreamName} {st : StreamState} {l : StreamSeq}
+    (hl : lookupStream c stream = some st) (hlt : l < st.nextSequence)
+    (hnd : ∀ name, o ≠ .deleteStream name) :
+    ∃ st', lookupStream c' stream = some st' ∧ l < st'.nextSequence := by
+  cases o with
+  | publish pstream subject payload headers el now =>
+    have hps : publishStep c pstream subject payload headers el now = .ok (c', r) := hstep
+    obtain ⟨st0, hl0, hc', hr⟩ := publishStep_ok_eq hps
+    by_cases hse : stream = pstream
+    · subst hse
+      rw [hl0] at hl
+      cases hl
+      refine ⟨(applyPublish st subject payload headers (isRollup headers) now).1, ?_, ?_⟩
+      · rw [hc']
+        exact lookupStream_updateStream_self c stream st _ hl0
+      · show l < (applyPublish st subject payload headers (isRollup headers) now).1.nextSequence
+        rw [applyPublish_nextSequence]
+        exact Nat.lt_succ_of_lt hlt
+    · refine ⟨st, ?_, hlt⟩
+      rw [hc', lookupStream_updateStream_other c pstream stream _ hse]
+      exact hl
+  | deleteStream name => exact absurd rfl (hnd name)
+  | createStream raw =>
+    exact ⟨st, step_lookup_preserved hstep hl (fun a b cc d e f hc => by cases hc)
+      (fun n hc => by cases hc), hlt⟩
+  | getStream nm =>
+    exact ⟨st, step_lookup_preserved hstep hl (fun a b cc d e f hc => by cases hc)
+      (fun n hc => by cases hc), hlt⟩
+  | lastMessageForSubject a b =>
+    exact ⟨st, step_lookup_preserved hstep hl (fun a b cc d e f hc => by cases hc)
+      (fun n hc => by cases hc), hlt⟩
+
+/-- The shape of a successful `rtOp` on the core. -/
+theorem rtOp_core {s s' : RtState} {o : Op} {e : Expect} (h : rtOp s o e = some s') :
+    s'.core = s.core ∨ ∃ r, step s.core o = .ok (s'.core, r) := by
+  unfold rtOp at h
+  repeat' split at h
+  all_goals first
+    | (cases h; exact Or.inl rfl)
+    | (cases h; exact Or.inr ⟨_, by assumption⟩)
+    | cases h
+
+theorem rtOp_invAux {s s' : RtState} {o : Op} {e : Expect}
+    (hinv : RtInv s) (h : rtOp s o e = some s') : RtInv s' ∧ RtAux s' := by
+  have hnofan : s.fanOut = none := by
+    unfold rtOp at h
+    split at h
+    · cases h
+    · rename_i hfs
+      cases hf : s.fanOut with
+      | none => rfl
+      | some f => rw [hf] at hfs; exact absurd rfl hfs
+  have hbound : ∀ p ∈ s.subs, p.2.registered = true →
+      ∃ st, lookupStream s.core p.2.stream = some st ∧ p.2.lastEnqueued < st.nextSequence := by
+    intro p hp hr
+    refine (hinv.subs p hp).registeredStream hr ?_
+    intro name hc
+    rw [hnofan] at hc
+    cases hc
+  unfold rtOp at h
+  split at h
+  · cases h
+  · cases hst : step s.core o with
+    | error err =>
+      cases e with
+      | ok r' => simp only [hst] at h; simp at h
+      | error err' =>
+        simp only [hst] at h
+        split at h
+        · cases h
+          exact ⟨hinv, fun f hf => by rw [hnofan] at hf; cases hf⟩
+        · cases h
+    | ok pair =>
+      obtain ⟨core', r⟩ := pair
+      cases e with
+      | error err' => simp only [hst] at h; simp at h
+      | ok r' =>
+        simp only [hst] at h
+        split at h
+        · cases h
+        · have hcore : stateInv core' := step_preserves_inv hinv.core hst
+          have hplain : ∀ (s2 : RtState), s2 = { s with core := core' } →
+              (∀ name, o ≠ .deleteStream name) → RtInv s2 ∧ RtAux s2 := by
+            intro s2 hs2 hnd
+            subst hs2
+            refine ⟨⟨?_, hinv.shape, ?_, hcore⟩, ?_⟩
+            · intro p hp
+              refine ⟨(hinv.subs p hp).capacityPos, (hinv.subs p hp).queue,
+                (hinv.subs p hp).registeredOpen, (hinv.subs p hp).closeStartedOpen, ?_⟩
+              intro hr _
+              obtain ⟨st, hls, hlt⟩ := hbound p hp hr
+              exact step_keeps_bound hst hls hlt hnd
+            · intro f hf
+              rw [hnofan] at hf
+              cases hf
+            · intro f hf
+              rw [hnofan] at hf
+              cases hf
+          cases o with
+          | createStream raw =>
+            cases r <;> (cases h; exact hplain _ rfl (fun n hc => by cases hc))
+          | getStream nm =>
+            cases r <;> (cases h; exact hplain _ rfl (fun n hc => by cases hc))
+          | lastMessageForSubject a b =>
+            cases r <;> (cases h; exact hplain _ rfl (fun n hc => by cases hc))
+          | publish stream subject payload headers el now =>
+            cases r with
+            | unit => cases h; exact hplain _ rfl (fun n hc => by cases hc)
+            | config cc => cases h; exact hplain _ rfl (fun n hc => by cases hc)
+            | message mm => cases h; exact hplain _ rfl (fun n hc => by cases hc)
+            | sequence seq =>
+              cases h
+              obtain ⟨st0, hl0, hc', hr0⟩ := publishStep_ok_eq
+                (show publishStep s.core stream subject payload headers el now = .ok (core', .sequence seq)
+                  from hst)
+              refine ⟨⟨?_, hinv.shape, ?_, hcore⟩, ?_⟩
+              · intro p hp
+                refine ⟨(hinv.subs p hp).capacityPos, (hinv.subs p hp).queue,
+                  (hinv.subs p hp).registeredOpen, (hinv.subs p hp).closeStartedOpen, ?_⟩
+                intro hr _
+                obtain ⟨st, hls, hlt⟩ := hbound p hp hr
+                exact step_keeps_bound hst hls hlt (fun n hc => by cases hc)
+              · intro f hf
+                have hf2 : some
+                    { kind := FanKind.publish stream
+                        { subject := subject, sequence := seq, payload := payload,
+                          headers := headers, timestampMillis := now } el,
+                      remaining := fanOutIds s stream subject, decided := none,
+                      visited := [] } = some f := hf
+                obtain rfl := Option.some.inj hf2
+                refine ⟨fanOutIds_nodup s stream subject hinv.shape.1, ?_,
+                  (fun j b hb => by cases hb), (fun j b hb => by cases hb),
+                  (fun j hb => by cases hb)⟩
+                intro j hj
+                exact fanOutIds_known s stream subject hj
+              · intro f hf
+                have hf2 : some
+                    { kind := FanKind.publish stream
+                        { subject := subject, sequence := seq, payload := payload,
+                          headers := headers, timestampMillis := now } el,
+                      remaining := fanOutIds s stream subject, decided := none,
+                      visited := [] } = some f := hf
+                obtain rfl := Option.some.inj hf2
+                refine ⟨?_, (fun name hk => by cases hk)⟩
+                intro stream' m' el' hk
+                injection hk with hs1 hm1 hel1
+                subst hs1
+                subst hm1
+                refine ⟨⟨(applyPublish st0 subject payload headers (isRollup headers) now).1,
+                  ?_, ?_⟩, ?_⟩
+                · rw [hc']
+                  exact lookupStream_updateStream_self s.core stream st0 _ hl0
+                · show seq <
+                    (applyPublish st0 subject payload headers (isRollup headers) now).1.nextSequence
+                  rw [applyPublish_nextSequence]
+                  injection hr0 with hseq
+                  rw [hseq]
+                  exact Nat.lt_succ_self _
+                · intro j hj rv hrv
+                  rcases hj with hj | ⟨b, hb⟩ | ⟨ov, hov⟩
+                  · exact fanOutIds_stream hinv.shape.1 hj hrv
+                  · cases hb
+                  · cases hov
+          | deleteStream name =>
+            cases h
+            have hdel : deleteStep s.core name = .ok (core', r) := hst
+            have hc' : core' = removeStream s.core name := deleteStep_ok_eq hdel
+            refine ⟨⟨?_, hinv.shape, ?_, hcore⟩, ?_⟩
+            · intro p hp
+              refine ⟨(hinv.subs p hp).capacityPos, (hinv.subs p hp).queue,
+                (hinv.subs p hp).registeredOpen, (hinv.subs p hp).closeStartedOpen, ?_⟩
+              intro hr hn
+              exact absurd rfl (hn name)
+            · intro f hf
+              have hf2 : some
+                  { kind := FanKind.delete name, remaining := deleteIds s name,
+                    decided := none, visited := [] } = some f := hf
+              obtain rfl := Option.some.inj hf2
+              refine ⟨deleteIds_nodup s name hinv.shape.1, ?_,
+                (fun j b hb => by cases hb), (fun j b hb => by cases hb),
+                (fun j hb => by cases hb)⟩
+              intro j hj
+              exact deleteIds_known s name hj
+            · intro f hf
+              have hf2 : some
+                  { kind := FanKind.delete name, remaining := deleteIds s name,
+                    decided := none, visited := [] } = some f := hf
+              obtain rfl := Option.some.inj hf2
+              refine ⟨(fun stream' m' el' hk => by cases hk), ?_⟩
+              intro nm hk
+              injection hk with hnm
+              subst hnm
+              refine ⟨?_, ?_, ?_⟩
+              · rw [hc']
+                exact lookupStream_removeStream_self s.core name
+              · intro j rv hrv hr hs
+                exact deleteIds_mem hrv hr hs
+              · intro j rv hrv hr hs
+                obtain ⟨st, hls, hlt⟩ := hbound (j, rv) (mem_of_lookupRt _ _ _ hrv) hr
+                refine ⟨st, ?_, hlt⟩
+                rw [hc', lookupStream_removeStream_other s.core name rv.stream hs]
+                exact hls
+
+theorem rtRegister_invAux {s s' : RtState} {stream : StreamName} {opts : ConsumeOptions}
+    {l₀ : StreamSeq} {id : SubId} {e : Expect}
+    (hinv : RtInv s) (haux : RtAux s) (h : rtRegister s stream opts l₀ id e = some s') :
+    RtInv s' ∧ RtAux s' := by
+  unfold rtRegister at h
+  split at h
+  · cases h
+  · rename_i hg
+    simp only [Bool.or_eq_true, not_or, decide_eq_true_eq] at hg
+    obtain ⟨⟨hfs, hid⟩, hcap⟩ := hg
+    have hnofan : s.fanOut = none := by
+      cases hf : s.fanOut with
+      | none => rfl
+      | some f => rw [hf] at hfs; exact absurd rfl hfs
+    have hid2 : id = s.nextId := Classical.byContradiction hid
+    split at h
+    · rename_i name hls
+      split at h
+      · cases h
+        exact ⟨hinv, haux⟩
+      · cases h
+    · rename_i st hls
+      split at h
+      · rename_i hb
+        cases h
+        have hcap1 : 1 ≤ opts.buffer.capacity := Nat.pos_of_ne_zero hcap
+        have hfresh : ∀ p ∈ s.subs, p.1 ≠ id := by
+          intro p hp he
+          have := hinv.shape.2 p hp
+          rw [he, ← hid2] at this
+          exact Nat.lt_irrefl _ this
+        obtain ⟨-, hlt⟩ := replayBound_eq_true_iff.mp hb
+        refine ⟨⟨?_, ?_, ?_, hinv.core⟩, ?_⟩
+        · intro p hp
+          rcases List.mem_append.mp hp with hmem | hmem
+          · exact rtSubInv_state (s := s) _ rfl rfl (hinv.subs p hmem)
+          · rcases List.mem_singleton.mp hmem with he
+            subst he
+            refine ⟨hcap1, ⟨fun ht => Bool.noConfusion ht, fun e' he' => QueueStatus.noConfusion he',
+              fun e' he' => QueueStatus.noConfusion he', fun hc => QueueStatus.noConfusion hc,
+              Nat.zero_le _⟩, fun _ => ⟨rfl, rfl⟩, fun hc => Bool.noConfusion hc, ?_⟩
+            intro _ _
+            exact ⟨st, hls, hlt⟩
+        · refine ⟨?_, ?_⟩
+          · rw [List.map_append]
+            refine List.pairwise_append.mpr ⟨hinv.shape.1, List.pairwise_singleton _ _, ?_⟩
+            intro a ha b hb2
+            rcases List.mem_singleton.mp hb2 with he
+            subst he
+            obtain ⟨q, hq, hqf⟩ := List.mem_map.mp ha
+            rw [← hqf, hid2]
+            exact hinv.shape.2 q hq
+          · intro p hp
+            rcases List.mem_append.mp hp with hmem | hmem
+            · exact Nat.lt_succ_of_lt (by rw [hid2]; exact hinv.shape.2 p hmem)
+            · rcases List.mem_singleton.mp hmem with he
+              subst he
+              exact Nat.lt_succ_self _
+        · intro f hf
+          rw [hnofan] at hf
+          cases hf
+        · intro f hf
+          rw [hnofan] at hf
+          cases hf
+      · cases h
+    · cases h
+
+/-! ## The induction, and the frozen statements -/
+
+theorem rtStep_invAux {s s' : RtState} {l : RtLabel}
+    (hinv : RtInv s) (haux : RtAux s) (h : rtStep s l = some s') : RtInv s' ∧ RtAux s' := by
+  cases l with
+  | op o e => exact rtOp_invAux hinv h
+  | register stream opts l₀ id e => exact rtRegister_invAux hinv haux h
+  | check id => exact rtCheck_invAux hinv haux h
+  | resolve id => exact rtResolve_invAux hinv haux h
+  | endFanOut => exact rtEndFanOut_invAux hinv haux h
+  | pull id => exact rtPull_invAux hinv haux h
+  | wake id => exact rtWake_invAux hinv haux h
+  | closeA id => exact rtCloseA_invAux hinv haux h
+  | closeB id => exact rtCloseB_invAux hinv haux h
+
+/-- The one induction over `ReachableRt` in this package; every later runtime fact projects from
+it. `RtInv` alone is not inductive, so it is carried beside `RtAux`. -/
+theorem rtInvAux_reachable {s : RtState} (h : ReachableRt s) : RtInv s ∧ RtAux s := by
+  induction h with
+  | init =>
+    refine ⟨⟨?_, ⟨List.Pairwise.nil, ?_⟩, ?_, ?_⟩, ?_⟩
+    · intro p hp
+      cases hp
+    · intro p hp
+      cases hp
+    · intro f hf
+      cases hf
+    · intro p hp
+      cases hp
+    · intro f hf
+      cases hf
+  | step _ hnext ih => exact rtStep_invAux ih.1 ih.2 hnext
+
+theorem rtInv_reachable {s : RtState} (h : ReachableRt s) : RtInv s := (rtInvAux_reachable h).1
+
+theorem core_frame {s s' : RtState} {l : RtLabel} (h : rtStep s l = some s')
+    (hl : ∀ o e, l ≠ .op o e) : s'.core = s.core := by
+  cases l with
+  | op o e => exact absurd rfl (hl o e)
+  | register stream opts l₀ id e =>
+    have h2 : rtRegister s stream opts l₀ id e = some s' := h
+    unfold rtRegister at h2
+    repeat' split at h2
+    all_goals first | (cases h2; rfl) | cases h2
+  | check id =>
+    have h2 : rtCheck s id = some s' := h
+    unfold rtCheck at h2
+    repeat' split at h2
+    all_goals first | (cases h2; rfl) | cases h2
+  | resolve id =>
+    have h2 : rtResolve s id = some s' := h
+    unfold rtResolve at h2
+    repeat' split at h2
+    all_goals first | (cases h2; rfl) | cases h2
+  | endFanOut =>
+    have h2 : rtEndFanOut s = some s' := h
+    unfold rtEndFanOut at h2
+    repeat' split at h2
+    all_goals first | (cases h2; rfl) | cases h2
+  | pull id =>
+    have h2 : rtPull s id = some s' := h
+    unfold rtPull at h2
+    repeat' split at h2
+    all_goals first | (cases h2; rfl) | cases h2
+  | wake id =>
+    have h2 : rtWake s id = some s' := h
+    unfold rtWake at h2
+    repeat' split at h2
+    all_goals first | (cases h2; rfl) | cases h2
+  | closeA id =>
+    have h2 : rtCloseA s id = some s' := h
+    unfold rtCloseA at h2
+    repeat' split at h2
+    all_goals first | (cases h2; rfl) | cases h2
+  | closeB id =>
+    have h2 : rtCloseB s id = some s' := h
+    unfold rtCloseB at h2
+    repeat' split at h2
+    all_goals first | (cases h2; rfl) | cases h2
+
+theorem core_reachable {s : RtState} (h : ReachableRt s) : Reachable s.core := by
+  induction h with
+  | init => exact Reachable.init
+  | @step u u' l hr hnext ih =>
+    cases l with
+    | op o e =>
+      rcases rtOp_core (show rtOp u o e = some u' from hnext) with hc | ⟨r, hst⟩
+      · rw [hc]
+        exact ih
+      · exact Reachable.step ih hst
+    | register stream opts l₀ id e =>
+      rw [core_frame hnext (fun o e hc => by cases hc)]
+      exact ih
+    | check id =>
+      rw [core_frame hnext (fun o e hc => by cases hc)]
+      exact ih
+    | resolve id =>
+      rw [core_frame hnext (fun o e hc => by cases hc)]
+      exact ih
+    | endFanOut =>
+      rw [core_frame hnext (fun o e hc => by cases hc)]
+      exact ih
+    | pull id =>
+      rw [core_frame hnext (fun o e hc => by cases hc)]
+      exact ih
+    | wake id =>
+      rw [core_frame hnext (fun o e hc => by cases hc)]
+      exact ih
+    | closeA id =>
+      rw [core_frame hnext (fun o e hc => by cases hc)]
+      exact ih
+    | closeB id =>
+      rw [core_frame hnext (fun o e hc => by cases hc)]
+      exact ih
+
+theorem pending_le_capacity_rt {s : RtState} (h : ReachableRt s) :
+    ∀ p ∈ s.subs, p.2.queue.buffer.length ≤ p.2.policy.capacity :=
+  fun p hp => ((rtInv_reachable h).subs p hp).queue.capacity
 
 end EffectNatsSubstrate
