@@ -152,6 +152,9 @@ theorem entrySequences_map_entry (l : List StoredMessage) :
 
 theorem entrySequences_caughtUp : entrySequences [Observed.caughtUp] = [] := rfl
 
+theorem entrySequences_entry_singleton (m : StoredMessage) :
+    entrySequences [Observed.entry m] = [m.sequence] := rfl
+
 theorem entrySequences_failed (e : SubError) : entrySequences [Observed.failed e] = [] := rfl
 
 theorem mem_entrySequences {obs : List Observed} {n : StreamSeq} :
@@ -178,5 +181,21 @@ theorem pairwise_lt_append_singleton {l : List Nat} {x : Nat}
 theorem pairwise_sublist_of_append_left {l₁ l₂ : List Nat}
     (h : (l₁ ++ l₂).Pairwise (· < ·)) : l₁.Pairwise (· < ·) :=
   (List.pairwise_append.mp h).1
+
+/-! ## `SubInv` across a core change that keeps the subscriber's stream -/
+
+/-- A subscriber untouched by a transition keeps `SubInv` when, while it is registered,
+its own stream's lookup survives with a non-decreasing head. -/
+theorem SubInv.of_stream_lookup {s s' : SubState} {sub : Subscriber} (hinv : SubInv s sub)
+    (hcore : sub.registered = true → ∀ st₀, lookupStream s.core sub.stream = some st₀ →
+      ∃ st₁, lookupStream s'.core sub.stream = some st₁ ∧ st₀.nextSequence ≤ st₁.nextSequence) :
+    SubInv s' sub := by
+  refine ⟨hinv.capacityPos, hinv.capacity, hinv.registeredOpen, ?_, hinv.closingNonempty,
+    hinv.doneEmpty, hinv.shutDownClear, hinv.pendingMatch, hinv.visibleStrict, hinv.visibleBound,
+    hinv.pendingLast⟩
+  intro hr
+  obtain ⟨st₀, hl, hlt⟩ := hinv.registeredStream hr
+  obtain ⟨st₁, hl', hle⟩ := hcore hr _ hl
+  exact ⟨st₁, hl', Nat.lt_of_lt_of_le hlt hle⟩
 
 end EffectNatsSubstrate

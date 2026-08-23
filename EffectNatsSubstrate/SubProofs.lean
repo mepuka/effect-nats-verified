@@ -259,4 +259,159 @@ theorem unsubscribe_inv {s : SubState} {sub : Subscriber} (hinv : SubInv s sub) 
     exact List.mem_append_left _ hn
   · intro h; exact absurd rfl h
 
+/-! ## `SubInv` depends on the state only through its core -/
+
+theorem SubInv.core_eq {s s' : SubState} {sub : Subscriber} (h : s.core = s'.core)
+    (hinv : SubInv s sub) : SubInv s' sub := by
+  refine ⟨hinv.capacityPos, hinv.capacity, hinv.registeredOpen, ?_, hinv.closingNonempty,
+    hinv.doneEmpty, hinv.shutDownClear, hinv.pendingMatch, hinv.visibleStrict, hinv.visibleBound,
+    hinv.pendingLast⟩
+  intro hr
+  rw [← h]
+  exact hinv.registeredStream hr
+
+/-- A subscriber untouched by a transition keeps `SubInv` when the core's lookups survive
+with non-decreasing heads. -/
+theorem SubInv.of_lookups {s s' : SubState} {sub : Subscriber} (hinv : SubInv s sub)
+    (hcore : ∀ n st₀, lookupStream s.core n = some st₀ →
+      ∃ st₁, lookupStream s'.core n = some st₁ ∧ st₀.nextSequence ≤ st₁.nextSequence) :
+    SubInv s' sub := by
+  refine ⟨hinv.capacityPos, hinv.capacity, hinv.registeredOpen, ?_, hinv.closingNonempty,
+    hinv.doneEmpty, hinv.shutDownClear, hinv.pendingMatch, hinv.visibleStrict, hinv.visibleBound,
+    hinv.pendingLast⟩
+  intro hr
+  obtain ⟨st₀, hl, hlt⟩ := hinv.registeredStream hr
+  obtain ⟨st₁, hl', hle⟩ := hcore _ _ hl
+  exact ⟨st₁, hl', Nat.lt_of_lt_of_le hlt hle⟩
+
+/-! ## Preservation under fan-out and deletion -/
+
+theorem entrySequences_visible_admit (sub : Subscriber) (m : StoredMessage) :
+    entrySequences (visible { sub with pending := sub.pending ++ [m], lastEnqueued := m.sequence })
+      = entrySequences (visible sub) ++ [m.sequence] := by
+  simp [visible, entrySequences_append, entrySequences_map_entry, entrySequences_entry_singleton,
+    List.map_append]
+
+theorem deliverOne_inv {s s' : SubState} {stream : StreamName} {st : StreamState}
+    {m : StoredMessage} {sub : Subscriber} (hinv : SubInv s sub)
+    (hl : lookupStream s.core stream = some st) (hseq : m.sequence = st.nextSequence)
+    (hcore : ∀ n st₀, lookupStream s.core n = some st₀ →
+      ∃ st₁, lookupStream s'.core n = some st₁ ∧ st₀.nextSequence ≤ st₁.nextSequence)
+    (hbump : ∃ st', lookupStream s'.core stream = some st' ∧ st.nextSequence < st'.nextSequence) :
+    SubInv s' (deliverOne stream m sub) := by
+  unfold deliverOne
+  split
+  · rename_i hcond
+    simp only [Bool.and_eq_true, beq_iff_eq] at hcond
+    obtain ⟨⟨hstream, hreg⟩, hmatch⟩ := hcond
+    have hopen : sub.status = .opened := hinv.registeredOpen hreg
+    obtain ⟨st₀, hl₀, hlt₀⟩ := hinv.registeredStream hreg
+    rw [hstream, hl] at hl₀
+    cases hl₀
+    have hcapPos : 1 ≤ sub.policy.capacity := hinv.capacityPos
+    split
+    rename_i n hpol
+    rw [hpol] at hcapPos
+    simp only [Policy.capacity] at hcapPos
+    by_cases hfull : n ≤ sub.pending.length
+    · rw [if_pos hfull]
+      have hne : sub.pending ≠ [] := by
+        intro hnil
+        rw [hnil] at hfull
+        simp at hfull
+        omega
+      have hempty : sub.pending.isEmpty = false := by
+        cases hp : sub.pending with
+        | nil => exact absurd hp hne
+        | cons _ _ => rfl
+      rw [if_neg (by rw [hempty]; decide)]
+      refine ⟨hinv.capacityPos, hinv.capacity, ?_, ?_, ?_, ?_, ?_, hinv.pendingMatch,
+        hinv.visibleStrict, hinv.visibleBound, hinv.pendingLast⟩
+      · intro hr; cases hr
+      · intro hr; cases hr
+      · intro e h; exact hne
+      · intro e h; cases h
+      · intro h; cases h
+    · rw [if_neg hfull, if_pos hopen]
+      have hlt : sub.pending.length < n := Nat.lt_of_not_le hfull
+      obtain ⟨st', hl', hbump'⟩ := hbump
+      have hvis := entrySequences_visible_admit sub m
+      refine ⟨hinv.capacityPos, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+      · show (sub.pending ++ [m]).length ≤ sub.policy.capacity
+        rw [hpol, List.length_append, List.length_singleton]
+        simp only [Policy.capacity]
+        omega
+      · intro _; exact hopen
+      · intro _
+        refine ⟨st', ?_, ?_⟩
+        · show lookupStream s'.core sub.stream = some st'
+          rw [hstream]; exact hl'
+        · show m.sequence < st'.nextSequence
+          rw [hseq]; exact hbump'
+      · intro e h; have h' : sub.status = .closing e := h; simp [hopen] at h'
+      · intro e h; have h' : sub.status = .done e := h; simp [hopen] at h'
+      · intro h; have h' : sub.status = .shutDown := h; simp [hopen] at h'
+      · intro m' hm'
+        have hm'' : m' ∈ sub.pending ++ [m] := hm'
+        rcases List.mem_append.mp hm'' with hold | hnew
+        · exact hinv.pendingMatch m' hold
+        · rw [List.mem_singleton.mp hnew]; exact hmatch
+      · rw [hvis]
+        apply pairwise_lt_append_singleton hinv.visibleStrict
+        intro y hy
+        have := hinv.visibleBound y hy
+        rw [hseq]
+        exact Nat.lt_of_le_of_lt this hlt₀
+      · intro y hy
+        rw [hvis] at hy
+        show y ≤ m.sequence
+        rcases List.mem_append.mp hy with hold | hnew
+        · have := hinv.visibleBound y hold
+          rw [hseq]
+          exact Nat.le_of_lt (Nat.lt_of_le_of_lt this hlt₀)
+        · rw [List.mem_singleton.mp hnew]; exact Nat.le_refl _
+      · intro _
+        show ((sub.pending ++ [m]).map (·.sequence)).getLast? = some m.sequence
+        simp
+  · exact SubInv.of_lookups hinv hcore
+
+theorem endOne_inv {s s' : SubState} {name : StreamName} {sub : Subscriber} (hinv : SubInv s sub)
+    (hcore : ∀ n st₀, n ≠ name → lookupStream s.core n = some st₀ →
+      lookupStream s'.core n = some st₀) :
+    SubInv s' (endOne name sub) := by
+  unfold endOne
+  split
+  · rename_i hcond
+    simp only [Bool.and_eq_true, beq_iff_eq] at hcond
+    obtain ⟨hstream, hreg⟩ := hcond
+    refine ⟨hinv.capacityPos, hinv.capacity, ?_, ?_, ?_, ?_, ?_, hinv.pendingMatch,
+      hinv.visibleStrict, hinv.visibleBound, hinv.pendingLast⟩
+    · intro hr; cases hr
+    · intro hr; cases hr
+    · intro e h
+      have h' : (if sub.pending.isEmpty then QueueStatus.done (.streamNotFound name)
+                  else .closing (.streamNotFound name)) = .closing e := h
+      intro hnil
+      rw [hnil] at h'
+      simp at h'
+    · intro e h
+      have h' : (if sub.pending.isEmpty then QueueStatus.done (.streamNotFound name)
+                  else .closing (.streamNotFound name)) = .done e := h
+      cases hp : sub.pending with
+      | nil => rfl
+      | cons x xs => rw [hp] at h'; simp at h'
+    · intro h
+      have h' : (if sub.pending.isEmpty then QueueStatus.done (.streamNotFound name)
+                  else .closing (.streamNotFound name)) = .shutDown := h
+      split at h' <;> cases h'
+  · rename_i hcond
+    refine SubInv.of_stream_lookup hinv ?_
+    intro hreg st₀ hl
+    have hne : sub.stream ≠ name := by
+      intro heq
+      apply hcond
+      simp only [Bool.and_eq_true, beq_iff_eq]
+      exact ⟨heq, hreg⟩
+    exact ⟨st₀, hcore _ _ hne hl, Nat.le_refl _⟩
+
 end EffectNatsSubstrate
