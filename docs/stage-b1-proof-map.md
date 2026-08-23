@@ -265,6 +265,40 @@ closes, and both acceptance sets have ≥ 2 histories). Plus, per SB1 law, one c
 satisfying its hypotheses (cheap; list them in the module). All in `scripts/Axioms.lean`. The B1
 assurance review cites this module for axis "statement non-vacuity".
 
+### P5b — `SimPlaced.lean`: the enumeration side of `a4_complete`
+
+(S) `Placed` (inductive) and `historiesFrom_contains`, statements from overwatch round 5 §14b,
+elaborated in `research/logs/p5b2_statements.lean`. (M) `import EffectNatsSubstrate.SimAgree` and
+`EffectNatsSubstrate.Sim`. (E) induction on `Placed`; `pullsAtGap`'s `k s h` branch supplies the
+zero-pull case and its recursive branch the inserted pulls. **Measured tight** (round 5, four
+spines): the enabled placements equal the acceptance set exactly (4=4, 6=6, 6=6, 9=9), 0 membership
+failures, and no placement with three consecutive pulls of `id` is ever enabled — so the induction
+needs no hypothesis bounding insertions; enabledness supplies it, via `pull_third_none`. Keep the
+`hfree` side condition (free at the call site: `labelsWithoutPulls t id` is pull-free for `id`);
+round 5 could not show it needed for truth, and it states the intent.
+
+**Structural note for P5c** (round 5): `labelsWithoutPulls t id` has *more* gaps than the serial
+spine — one around every other subscriber's pull — so "merge `id`'s pulls at the same serial
+positions" is under-determined and need not be determined. `pullsAtGap`'s fuel of 2 is per gap of
+the *pull-stripped* list; three of `id`'s pulls in one serial gap are fine when another
+subscriber's pull separates them. The only forbidden shape is three *consecutive* pulls of `id`,
+which `pull_third_none` excludes.
+
+**P4b's auxiliary export** (round 5 §14c): **only** "the witness's labels are `.op`/`.register`/
+`.pull`". The rest is already in the frozen `A4Inclusion` — the witness runs, its serial labels are
+the run's in order, and the histories match. Do **not** add "pulls are of registered subscribers" or
+"registrations match": both are derivable. Confirmed on 64 quiescent close-free states: 0 lack a
+pull-only witness matching serial, both histories and both counts.
+
+**Merge-collision rule for P2/P3 (round 5 §15).** Both in-flight modules declare
+`lookupRt_updateRt_ne` (different binder explicitness *and* argument order) and
+`lookupRt_updateRt_self` (**genuinely different statements** — P3's is hypothesis-free and strictly
+stronger). The "later module imports the earlier one" de-duplication rule does **not** resolve this:
+deleting either duplicate breaks call sites. At the second merge the coordinator: keeps P3's
+hypothesis-free `_self`, picks either `_ne` and fixes the call sites in the other module, and moves
+both plus `updateRt_keys` into one shared `RtListLemmas.lean` that both import. This is a
+coordinator fix-up commit on `main`, not lane work.
+
 ## 4. Gate
 
 `bash scripts/gate.sh` (build clean, forbidden sweep, `#print axioms` over `scripts/Axioms.lean`,
