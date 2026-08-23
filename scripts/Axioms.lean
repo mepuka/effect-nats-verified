@@ -208,3 +208,9 @@ open EffectNatsSubstrate
 #print axioms applyOp_error_frame
 #print axioms pullStep_third_none
 #print axioms pull_third_none
+#print axioms agreeAt_refl
+#print axioms agreeAt_symm
+#print axioms agreeAt_trans
+#print axioms applyPull_agreeAt
+#print axioms apply_agreeAt
+#print axioms observedOf_agreeAt
