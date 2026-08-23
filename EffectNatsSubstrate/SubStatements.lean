@@ -164,6 +164,16 @@ theorem publish_visible {s : SubState} {stream : StreamName} {subject : SubjectN
       rw [deliverOne_overflow hcond hpol (Nat.le_of_eq hfull.symm)]
       exact ⟨rfl, rfl⟩
 
+/-- An operation that leaves the subscriber map untouched cannot change what the
+subscriber sees. -/
+theorem visible_eq_of_subs_unchanged {s s' : SubState} {sub sub' : Subscriber} {id : SubId}
+    (hb : lookupSub s.subs id = some sub) (ha : lookupSub s'.subs id = some sub')
+    (hsame : s'.subs = s.subs) : visible sub' = visible sub := by
+  rw [hsame] at ha
+  rw [hb] at ha
+  cases ha
+  rfl
+
 theorem op_visible_frame {s : SubState} {o : Op} {e : Expect} {s' : SubState} {id : SubId}
     {sub sub' : Subscriber} (h : apply s (.op o e) = some s')
     (hb : lookupSub s.subs id = some sub) (ha : lookupSub s'.subs id = some sub')
@@ -184,14 +194,14 @@ theorem op_visible_frame {s : SubState} {o : Op} {e : Expect} {s' : SubState} {i
         rcases hnm stream subject payload headers x now rfl with hne | hfalse
         · simp [hne]
         · simp [hfalse]
-      | unit => simp only [afterOp] at ha; rw [hb] at ha; cases ha; rfl
-      | config c => simp only [afterOp] at ha; rw [hb] at ha; cases ha; rfl
-      | message m => simp only [afterOp] at ha; rw [hb] at ha; cases ha; rfl
+      | unit => exact visible_eq_of_subs_unchanged hb ha rfl
+      | config c => exact visible_eq_of_subs_unchanged hb ha rfl
+      | message m => exact visible_eq_of_subs_unchanged hb ha rfl
     | deleteStream name => exact absurd rfl (hnd name)
-    | createStream raw => simp only [afterOp] at ha; rw [hb] at ha; cases ha; rfl
-    | getStream name => simp only [afterOp] at ha; rw [hb] at ha; cases ha; rfl
+    | createStream raw => exact visible_eq_of_subs_unchanged hb ha rfl
+    | getStream name => exact visible_eq_of_subs_unchanged hb ha rfl
     | lastMessageForSubject stream subject =>
-      simp only [afterOp] at ha; rw [hb] at ha; cases ha; rfl
+      exact visible_eq_of_subs_unchanged hb ha rfl
   | error err =>
     obtain ⟨heq, -⟩ :=
       applyOp_error_eq (deliver := deliverOne)
