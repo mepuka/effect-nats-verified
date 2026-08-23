@@ -110,13 +110,11 @@ theorem memory_lastEnqueued_admissible {s : JSState} {stream : StreamName} {st :
     replayBound st.messages opts (st.nextSequence - 1) st.nextSequence = true := by
   have hbelow := (reachable_sequences_strict h hl).2
   have hpos := (reachable_positive h hl).1
-  unfold replayBound
-  rw [Bool.and_eq_true, List.all_eq_true]
+  rw [replayBound_eq_true_iff]
   refine ⟨?_, ?_⟩
   · intro m hm
-    have hlt : m.sequence < st.nextSequence := hbelow m (selectReplay_mem hm).1
-    exact decide_eq_true (Nat.le_sub_one_of_lt hlt)
-  · exact decide_eq_true (Nat.sub_one_lt (Nat.pos_iff_ne_zero.mp hpos))
+    exact Nat.le_sub_one_of_lt (hbelow m (selectReplay_mem hm).1)
+  · exact Nat.sub_one_lt (Nat.pos_iff_ne_zero.mp hpos)
 
 /-! ## SA5 — the consumer-visible sequence, per transition -/
 

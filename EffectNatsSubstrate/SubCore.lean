@@ -146,6 +146,12 @@ theorem createStep_ok_shape {s s' : JSState} {raw : RawStreamConfig} {r : Ret}
       cases h
       exact Or.inr ⟨config, hval, hlook, rfl⟩
 
+theorem replayBound_eq_true_iff {messages : List StoredMessage} {opts : ConsumeOptions}
+    {l₀ nextSeq : Nat} :
+    replayBound messages opts l₀ nextSeq = true ↔
+      (∀ m ∈ selectReplay messages opts, m.sequence ≤ l₀) ∧ l₀ < nextSeq := by
+  simp [replayBound, Bool.and_eq_true, List.all_eq_true, decide_eq_true_eq]
+
 theorem getStep_ok_eq {s s' : JSState} {name : StreamName} {r : Ret}
     (h : getStep s name = .ok (s', r)) : s' = s := by
   unfold getStep at h

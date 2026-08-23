@@ -231,9 +231,7 @@ theorem newSubscriber_inv {s : SubState} {stream : StreamName} {opts : ConsumeOp
     (hbound : replayBound st.messages opts l₀ st.nextSequence = true)
     (hstrict : st.messages.Pairwise (fun a b => a.sequence < b.sequence)) :
     SubInv s (newSubscriber stream opts l₀ st.messages) := by
-  have hrb := hbound
-  simp only [replayBound, Bool.and_eq_true, List.all_eq_true, decide_eq_true_eq] at hrb
-  obtain ⟨hall, hlt⟩ := hrb
+  obtain ⟨hall, hlt⟩ := replayBound_eq_true_iff.mp hbound
   constructor
   · exact Nat.pos_of_ne_zero hcap
   · exact Nat.zero_le _
