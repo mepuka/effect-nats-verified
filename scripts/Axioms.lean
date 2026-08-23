@@ -190,3 +190,12 @@ open EffectNatsSubstrate
 #print axioms RtScenario.rt_cases_admitted
 #print axioms RtScenario.counterexample_inclusion_witness
 #print axioms RtScenario.counterexample_wrong_witness
+#print axioms takeAll_drains
+#print axioms takeAll_closing
+#print axioms fail_empty
+#print axioms fail_nonempty
+#print axioms exit_after_drain
+#print axioms shutdown_clears
+#print axioms size_eq_length
+#print axioms offer_admits
+#print axioms offer_refused
