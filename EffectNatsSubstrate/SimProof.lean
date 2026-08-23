@@ -1648,4 +1648,549 @@ theorem rel_step_closeB {s s' : RtState} {id : SubId} (_hinv : RtInv s)
         (fun e? a hc => closeB_corr hcs hc) hrel hhist)
 
 
+/-! ## Runtime association lists, continued -/
+
+theorem lookupRt_append :
+    ∀ (l : List (SubId × RtSubscriber)) (i k : SubId) (r : RtSubscriber),
+      lookupRt (l ++ [(i, r)]) k =
+        match lookupRt l k with
+        | some b => some b
+        | none => if i = k then some r else none := by
+  intro l
+  induction l with
+  | nil => intro i k r; rfl
+  | cons p rest ih =>
+    obtain ⟨j, sub⟩ := p
+    intro i k r
+    show lookupRt ((j, sub) :: (rest ++ [(i, r)])) k = _
+    simp only [lookupRt]
+    by_cases hjk : j = k
+    · simp only [if_pos hjk]
+    · simp only [if_neg hjk]
+      exact ih i k r
+
+theorem lookupRt_none_of_fresh :
+    ∀ (l : List (SubId × RtSubscriber)) (k : SubId),
+      (∀ p ∈ l, p.1 ≠ k) → lookupRt l k = none := by
+  intro l
+  induction l with
+  | nil => intro k _; rfl
+  | cons p rest ih =>
+    obtain ⟨j, sub⟩ := p
+    intro k h
+    have hjk : j ≠ k := h (j, sub) List.mem_cons_self
+    simp only [lookupRt, if_neg hjk]
+    exact ih k (fun q hq => h q (List.mem_cons_of_mem _ hq))
+
+theorem lookupRt_of_mem_pairwise :
+    ∀ (l : List (SubId × RtSubscriber)) (k : SubId) (r : RtSubscriber),
+      (l.map Prod.fst).Pairwise (· < ·) → (k, r) ∈ l → lookupRt l k = some r := by
+  intro l
+  induction l with
+  | nil => intro k r _ h; cases h
+  | cons p rest ih =>
+    obtain ⟨j, sub⟩ := p
+    intro k r hp h
+    rw [List.map_cons, List.pairwise_cons] at hp
+    obtain ⟨hlt, hrest⟩ := hp
+    rcases List.mem_cons.mp h with heq | hmem
+    · cases heq
+      simp [lookupRt]
+    · have hjk : j ≠ k := by
+        intro hj
+        have hmemk : k ∈ rest.map Prod.fst := List.mem_map.mpr ⟨(k, r), hmem, rfl⟩
+        have := hlt k hmemk
+        rw [hj] at this
+        exact Nat.lt_irrefl _ this
+      simp only [lookupRt, if_neg hjk]
+      exact ih k r hrest hmem
+
+/-! ## The core step of a deletion -/
+
+theorem deleteStep_ret {c c' : JSState} {name : StreamName} {r : Ret}
+    (h : step c (.deleteStream name) = .ok (c', r)) : r = .unit := by
+  have h' : deleteStep c name = .ok (c', r) := h
+  unfold deleteStep at h'
+  split at h'
+  · injection h' with h''
+    injection h'' with _ hr
+    exact hr.symm
+  · cases h'
+
+/-! ## Label lists without registrations -/
+
+def NoRegister (ls : List Label) : Prop :=
+  ∀ l ∈ ls, ∀ stream opts l₀ j e, l ≠ .register stream opts l₀ j e
+
+theorem owedOp_ne_register (k : FanKind) (stream : StreamName) (opts : ConsumeOptions)
+    (l₀ : StreamSeq) (j : SubId) (e : Expect) : owedOp k ≠ .register stream opts l₀ j e := by
+  cases k <;> intro h <;> exact Label.noConfusion h
+
+theorem apply_noRegister_frame {s t : SubState} {l : Label}
+    (hl : ∀ stream opts l₀ j e, l ≠ .register stream opts l₀ j e)
+    (h : apply s l = some t) :
+    t.nextId = s.nextId ∧ t.subs.map Prod.fst = s.subs.map Prod.fst := by
+  cases l with
+  | op o e =>
+    rcases e with r | err
+    · obtain ⟨core', -, ht⟩ := applyOp_ok_eq (deliver := deliverOne) h
+      rw [ht]
+      cases o with
+      | publish stream subject payload headers el now =>
+        cases r <;> exact ⟨rfl, by simp only [afterOp, keys_map_snd]⟩
+      | deleteStream name =>
+        cases r <;> exact ⟨rfl, by simp only [afterOp, keys_map_snd]⟩
+      | createStream _ => cases r <;> exact ⟨rfl, rfl⟩
+      | getStream _ => cases r <;> exact ⟨rfl, rfl⟩
+      | lastMessageForSubject _ _ => cases r <;> exact ⟨rfl, rfl⟩
+    · obtain ⟨ht, -⟩ := applyOp_error_eq (deliver := deliverOne) h
+      rw [ht]
+      exact ⟨rfl, rfl⟩
+  | register stream opts l₀ j e => exact absurd rfl (hl stream opts l₀ j e)
+  | pull j =>
+    obtain ⟨sub, sub', -, -, ht⟩ :=
+      applyPull_ok_eq (pull := pullStep) (show applyPull pullStep s j = some t from h)
+    rw [ht]
+    exact ⟨rfl, updateSub_keys _ _ _⟩
+  | unsubscribe j =>
+    obtain ⟨sub, -, -, ht⟩ := applyUnsubscribe_ok_eq (show applyUnsubscribe s j = some t from h)
+    rw [ht]
+    exact ⟨rfl, updateSub_keys _ _ _⟩
+
+theorem runLabels_noRegister_frame : ∀ (ls : List Label) {s t : SubState},
+    NoRegister ls → runLabels s ls = some t →
+    t.nextId = s.nextId ∧ t.subs.map Prod.fst = s.subs.map Prod.fst := by
+  intro ls
+  induction ls with
+  | nil => intro s t _ h; cases h; exact ⟨rfl, rfl⟩
+  | cons l rest ih =>
+    intro s t hls h
+    rw [runLabels_cons] at h
+    cases hap : apply s l with
+    | none => rw [hap] at h; cases h
+    | some u =>
+      rw [hap] at h
+      obtain ⟨h₁, h₂⟩ := apply_noRegister_frame (fun stream opts l₀ j e =>
+        hls l (List.Mem.head _) stream opts l₀ j e) hap
+      obtain ⟨h₃, h₄⟩ := ih (fun m hm => hls m (List.Mem.tail _ hm)) h
+      exact ⟨h₃.trans h₁, h₄.trans h₂⟩
+
+
+theorem closed_rtFail {e : SubError} {r : RtSubscriber} (h : Closed r) : Closed (rtFail e r) := by
+  rcases h with h | h
+  · exact closed_failOpt_of_closeStarted (e? := some e) h
+  · exact closed_failOpt_of_shutDown (e? := some e) h
+
+theorem not_closed_rtFail {e : SubError} {r : RtSubscriber} (hcs : r.closeStarted = false)
+    (hsd : r.queue.status ≠ .shutDown) : ¬ Closed (rtFail e r) :=
+  not_closed_failOpt (e? := some e) hcs hsd
+
+theorem corrSub_status {r : RtSubscriber} {a : Subscriber} (hcorr : corrSub r a)
+    (hcl : ¬ Closed r) : a.status = r.queue.status := by rw [hcorr.2 hcl]; rfl
+
+theorem isTargetOf_publish_registered {stream : StreamName} {m : StoredMessage}
+    {el : Option StreamSeq} {a : Subscriber} (h : isTargetOf (.publish stream m el) a = true) :
+    a.registered = true := by
+  have h' : (a.stream == stream && a.registered && matchesAny a.filters m.subject) = true := h
+  simp only [Bool.and_eq_true] at h'
+  exact h'.1.2
+
+theorem isTargetOf_delete_registered {name : StreamName} {a : Subscriber}
+    (h : isTargetOf (.delete name) a = true) : a.registered = true := by
+  have h' : (a.stream == name && a.registered) = true := h
+  simp only [Bool.and_eq_true] at h'
+  exact h'.2
+
+/-- A `check` that decided overflow: the abstract `deliverOne` lags the subscriber exactly as the
+matching `resolve` will. -/
+theorem overflow_corr {r : RtSubscriber} {a : Subscriber} {stream : StreamName}
+    {m : StoredMessage} {el : Option StreamSeq} {n : Nat}
+    (hpol : r.policy = .terminateOnLag n)
+    (hro : r.registered = true → r.queue.status = .opened)
+    (htgt : a.status = .shutDown ∨ isTargetOf (.publish stream m el) a = true)
+    (hov : n ≤ r.queue.size)
+    (hcorr : corrSub r a) :
+    corrSub (rtFail (.consumerLagged stream r.lastEnqueued) r) (deliverOne stream m a) := by
+  by_cases hcl : Closed r
+  · obtain ⟨h1, h2, h3⟩ := hcorr.1 hcl
+    rw [deliverOne_skip (by simp [h2])]
+    exact corrSub_of_closed (closed_rtFail hcl) h1 h2 h3
+  · have hae : a = r.erase := hcorr.2 hcl
+    have hsd : r.queue.status ≠ .shutDown := fun h => hcl (Or.inr h)
+    have hcs : r.closeStarted = false := by
+      cases hb : r.closeStarted with
+      | false => rfl
+      | true => exact absurd (Or.inl hb) hcl
+    have hstA : a.status = r.queue.status := by rw [hae]; rfl
+    have hcond : isTargetOf (.publish stream m el) a = true := by
+      rcases htgt with h | h
+      · exact absurd (hstA.symm.trans h) hsd
+      · exact h
+    have hreg : r.registered = true := by
+      have := isTargetOf_publish_registered hcond
+      rw [hae] at this
+      exact this
+    have hst : r.queue.status = .opened := hro hreg
+    have hpolA : a.policy = .terminateOnLag n := by rw [hae]; exact hpol
+    have hfull : n ≤ a.pending.length := by
+      rw [hae]
+      show n ≤ r.queue.buffer.length
+      rw [← size_eq_length r.queue (Or.inl hst)]
+      exact hov
+    rw [deliverOne_overflow hcond hpolA hfull]
+    refine corrSub_of_erase (not_closed_rtFail hcs hsd) ?_
+    rw [hae]
+    show _ = (rtFail (.consumerLagged stream r.lastEnqueued) r).erase
+    simp only [RtSubscriber.erase, rtFail, fail_buffer, fail_status, hst]
+    simp
+
+/-- A `resolve` that admits: the abstract `deliverOne` appends the same message. -/
+theorem admit_corr {r : RtSubscriber} {a : Subscriber} {stream : StreamName}
+    {m : StoredMessage} {el : Option StreamSeq} {q' : EffectQueue}
+    {res : EffectQueue.OfferResult}
+    (hro : r.registered = true → r.queue.status = .opened)
+    (hroom : r.queue.buffer.length < r.policy.capacity ∨ r.queue.status ≠ .opened)
+    (htgt : a.status = .shutDown ∨ isTargetOf (.publish stream m el) a = true)
+    (hoffer : r.queue.offer r.policy.capacity m = (q', res))
+    (hcorr : corrSub r a) :
+    corrSub { r with queue := q', lastEnqueued := m.sequence } (deliverOne stream m a) := by
+  by_cases hcl : Closed r
+  · obtain ⟨h1, h2, h3⟩ := hcorr.1 hcl
+    rw [deliverOne_skip (by simp [h2])]
+    refine corrSub_of_closed ?_ h1 h2 h3
+    rcases hcl with h | h
+    · exact Or.inl h
+    · refine Or.inr ?_
+      have hqq : q' = r.queue := by
+        rw [offer_refused r.policy.capacity r.queue m
+          (by rw [h]; intro hc; exact QueueStatus.noConfusion hc)] at hoffer
+        injection hoffer with h1 _
+        exact h1.symm
+      show q'.status = .shutDown
+      rw [hqq]
+      exact h
+  · have hae : a = r.erase := hcorr.2 hcl
+    have hsd : r.queue.status ≠ .shutDown := fun h => hcl (Or.inr h)
+    have hcs : r.closeStarted = false := by
+      cases hb : r.closeStarted with
+      | false => rfl
+      | true => exact absurd (Or.inl hb) hcl
+    have hstA : a.status = r.queue.status := by rw [hae]; rfl
+    have hcond : isTargetOf (.publish stream m el) a = true := by
+      rcases htgt with h | h
+      · exact absurd (hstA.symm.trans h) hsd
+      · exact h
+    have hreg : r.registered = true := by
+      have := isTargetOf_publish_registered hcond
+      rw [hae] at this
+      exact this
+    have hst : r.queue.status = .opened := hro hreg
+    have hroom' : r.queue.buffer.length < r.policy.capacity := by
+      rcases hroom with h | h
+      · exact h
+      · exact absurd hst h
+    have hq' : q' = { r.queue with buffer := r.queue.buffer ++ [m] } := by
+      rw [offer_admits r.policy.capacity r.queue m hst hroom'] at hoffer
+      injection hoffer with h1 _
+      exact h1.symm
+    obtain ⟨n, hn⟩ : ∃ n, r.policy = .terminateOnLag n := by
+      cases hp : r.policy with
+      | terminateOnLag n => exact ⟨n, rfl⟩
+    have hpolA : a.policy = .terminateOnLag n := by rw [hae]; exact hn
+    have hcap : r.policy.capacity = n := by rw [hn]; rfl
+    have hroomA : a.pending.length < n := by
+      rw [hae]
+      show r.queue.buffer.length < n
+      rw [← hcap]
+      exact hroom'
+    have hopenA : a.status = .opened := hstA.trans hst
+    rw [deliverOne_admit hcond hpolA hroomA hopenA]
+    refine corrSub_of_erase ?_ ?_
+    · rintro (h | h)
+      · rw [hcs] at h; exact Bool.noConfusion h
+      · rw [hq'] at h
+        rw [show ({ r.queue with buffer := r.queue.buffer ++ [m] } : EffectQueue).status
+              = r.queue.status from rfl, hst] at h
+        cases h
+    · rw [hae, hq']
+      rfl
+
+/-- A `resolve` of a deletion fan-out: the abstract `endOne` fails the same subscriber. -/
+theorem end_corr {r : RtSubscriber} {a : Subscriber} {name : StreamName}
+    (hro : r.registered = true → r.queue.status = .opened)
+    (htgt : a.status = .shutDown ∨ isTargetOf (.delete name) a = true)
+    (hcorr : corrSub r a) :
+    corrSub (rtFail (.streamNotFound name) r) (endOne name a) := by
+  by_cases hcl : Closed r
+  · obtain ⟨h1, h2, h3⟩ := hcorr.1 hcl
+    rw [endOne_skip (by simp [h2])]
+    exact corrSub_of_closed (closed_rtFail hcl) h1 h2 h3
+  · have hae : a = r.erase := hcorr.2 hcl
+    have hsd : r.queue.status ≠ .shutDown := fun h => hcl (Or.inr h)
+    have hcs : r.closeStarted = false := by
+      cases hb : r.closeStarted with
+      | false => rfl
+      | true => exact absurd (Or.inl hb) hcl
+    have hstA : a.status = r.queue.status := by rw [hae]; rfl
+    have hcond : isTargetOf (.delete name) a = true := by
+      rcases htgt with h | h
+      · exact absurd (hstA.symm.trans h) hsd
+      · exact h
+    have hreg : r.registered = true := by
+      have := isTargetOf_delete_registered hcond
+      rw [hae] at this
+      exact this
+    have hst : r.queue.status = .opened := hro hreg
+    rw [endOne_end hcond]
+    refine corrSub_of_erase (not_closed_rtFail hcs hsd) ?_
+    rw [hae]
+    show _ = (rtFail (.streamNotFound name) r).erase
+    simp only [RtSubscriber.erase, rtFail, fail_buffer, fail_status, hst]
+    simp
+
+
+/-- Where the owed operation leaves a subscriber whose point has not passed. -/
+theorem owed_lookup {sA sPost : SubState} {f : FanOut} {owedRest : List Label} {id : SubId}
+    {a : Subscriber}
+    (hrun : runLabels sA (owedOp f.kind :: owedRest) = some sPost)
+    (hok : OwedOk f owedRest) (hnp : pointPassed f id = false)
+    (hlka : lookupSub sA.subs id = some a) :
+    (∀ stream m el, f.kind = .publish stream m el →
+        lookupSub sPost.subs id = some (deliverOne stream m a)) ∧
+    (∀ name, f.kind = .delete name → lookupSub sPost.subs id = some (endOne name a)) := by
+  rw [runLabels_cons] at hrun
+  cases hap : apply sA (owedOp f.kind) with
+  | none => rw [hap] at hrun; cases hrun
+  | some sA₁ =>
+    rw [hap] at hrun
+    have hframe : lookupSub sPost.subs id = lookupSub sA₁.subs id :=
+      runLabels_lookup_frame owedRest
+        (fun l hl => by
+          obtain ⟨j, hj, hpj⟩ := hok l hl
+          refine ⟨j, hj, fun he => ?_⟩
+          rw [he, hnp] at hpj
+          exact Bool.noConfusion hpj)
+        hrun
+    constructor
+    · intro stream m el hk
+      rw [hframe]
+      rw [hk] at hap
+      have hpe := applyOp_publish_each
+        (show apply sA (.op (.publish stream m.subject m.payload m.headers el m.timestampMillis)
+          (.ok (.sequence m.sequence))) = some sA₁ from hap) id
+      rw [hpe, hlka]
+      rfl
+    · intro name hk
+      rw [hframe]
+      rw [hk] at hap
+      have hpe := applyOp_delete_each
+        (show apply sA (.op (.deleteStream name) (.ok .unit)) = some sA₁ from hap) id
+      rw [hpe, hlka]
+      rfl
+
+/-- The three shapes of a successful runtime registration, paired with the abstract step it
+matches from any state agreeing on the core and on `nextId`. -/
+theorem rtRegister_cases {s s' : RtState} {stream : StreamName} {opts : ConsumeOptions}
+    {l₀ : StreamSeq} {id : SubId} {e : Expect}
+    (h : rtRegister s stream opts l₀ id e = some s') :
+    s.fanOut = none ∧ id = s.nextId ∧
+      ((s' = s ∧ ∀ (sA : SubState), sA.core = s.core → sA.nextId = s.nextId →
+          applyRegister sA stream opts l₀ id e = some sA)
+       ∨ (∃ st : StreamState, s' = { s with
+              subs := s.subs ++ [(id,
+                { stream := stream, filters := opts.filters, policy := opts.buffer,
+                  registered := true, lastEnqueued := l₀, queue := EffectQueue.empty,
+                  chunks := [replayObserved st.messages opts], closeStarted := false })],
+              nextId := id + 1 } ∧
+            ∀ (sA : SubState), sA.core = s.core → sA.nextId = s.nextId →
+              applyRegister sA stream opts l₀ id e = some
+                { sA with subs := sA.subs ++ [(id, newSubscriber stream opts l₀ st.messages)],
+                          nextId := id + 1 })) := by
+  unfold rtRegister at h
+  split at h
+  · cases h
+  · rename_i hg
+    simp only [Bool.or_eq_true, not_or, decide_eq_true_eq] at hg
+    obtain ⟨⟨hfan, hid⟩, hcap⟩ := hg
+    have hfan' : s.fanOut = none := by
+      cases hf : s.fanOut with
+      | none => rfl
+      | some f => rw [hf] at hfan; exact absurd rfl hfan
+    have hid' : id = s.nextId := Classical.byContradiction hid
+    have hguard : ¬ (id ≠ s.nextId || opts.buffer.capacity = 0) := by
+      simp only [Bool.or_eq_true, not_or, decide_eq_true_eq]
+      exact ⟨hid, hcap⟩
+    refine ⟨hfan', hid', ?_⟩
+    split at h
+    · rename_i name hls
+      split at h
+      · rename_i hname
+        cases h
+        refine Or.inl ⟨rfl, fun sA hc hn => ?_⟩
+        unfold applyRegister
+        rw [if_neg (by rw [hn]; exact hguard), hc, hls]
+        simp only [if_pos hname]
+      · cases h
+    · rename_i st hls
+      split at h
+      · rename_i hb
+        cases h
+        refine Or.inr ⟨st, rfl, fun sA hc hn => ?_⟩
+        unfold applyRegister
+        rw [if_neg (by rw [hn]; exact hguard), hc, hls]
+        simp only [if_pos hb]
+      · cases h
+    · cases h
+
+
+theorem lookup_lt_nextId {s : RtState} (hinv : RtInv s) {id : SubId} {r : RtSubscriber}
+    (h : lookupRt s.subs id = some r) : id < s.nextId :=
+  hinv.shape.2 (id, r) (mem_of_lookupRt s.subs id r h)
+
+theorem lookupSub_none_of_keys {sA : SubState} {s : RtState} {id : SubId}
+    (hkeys : sA.subs.map Prod.fst = s.subs.map Prod.fst)
+    (hfresh : ∀ p ∈ s.subs, p.1 ≠ id) : lookupSub sA.subs id = none := by
+  refine lookupSub_none_of_fresh (fun p hp => ?_)
+  have hmem : p.1 ∈ sA.subs.map Prod.fst := List.mem_map.mpr ⟨p, hp, rfl⟩
+  rw [hkeys] at hmem
+  obtain ⟨q, hq, hq'⟩ := List.mem_map.mp hmem
+  rw [← hq']
+  exact hfresh q hq
+
+theorem rel_step_register {s s' : RtState} {stream : StreamName} {opts : ConsumeOptions}
+    {l₀ : StreamSeq} {id : SubId} {e : Expect} (hinv : RtInv s)
+    (hstep : rtRegister s stream opts l₀ id e = some s') {labels owed : List Label}
+    (hrel : Rel s labels owed) (hhist : RelHist s labels owed) :
+    RelStep s' labels owed [Label.register stream opts l₀ id e]
+      (.register stream opts l₀ id e) := by
+  obtain ⟨hfan, hid, hcases⟩ := rtRegister_cases hstep
+  obtain ⟨sA, hrun, hnext, hkeys, hquiet, -⟩ := hrel
+  obtain ⟨howed, hcoreA, hcorr⟩ := hquiet hfan
+  subst howed
+  have hfresh : ∀ p ∈ s.subs, p.1 ≠ id := by
+    intro p hp he
+    have := hinv.shape.2 p hp
+    rw [he, ← hid] at this
+    exact Nat.lt_irrefl _ this
+  have hlkNone : lookupRt s.subs id = none := lookupRt_none_of_fresh s.subs id hfresh
+  have hlkNoneA : lookupSub sA.subs id = none := lookupSub_none_of_keys hkeys hfresh
+  have hserial : labelSerial (labels ++ [Label.register stream opts l₀ id e]) ++ labelSerial []
+      = labelSerial labels ++ labelSerial [] ++ [Label.register stream opts l₀ id e] := by
+    simp [labelSerial_append, labelSerial]
+  have hnu : NoUnsub labels → NoUnsub ([] : List Label) →
+      NoUnsub (labels ++ [Label.register stream opts l₀ id e]) ∧ NoUnsub ([] : List Label) := by
+    intro hnl _
+    exact ⟨noUnsub_append hnl (noUnsub_single (fun j hc => Label.noConfusion hc)),
+      fun l hl => by cases hl⟩
+  rcases hcases with ⟨hs', hab⟩ | ⟨st, hs', hab⟩
+  · rw [hs']
+    have hapA : apply sA (Label.register stream opts l₀ id e) = some sA := hab sA hcoreA hnext
+    refine ⟨labels ++ [Label.register stream opts l₀ id e], [],
+      ⟨sA, runLabels_snoc hrun hapA, hnext, hkeys, ?_, ?_⟩, ?_, hserial, fun _ => hnu⟩
+    · exact fun _ => ⟨rfl, hcoreA, hcorr⟩
+    · intro f hf; rw [hfan] at hf; cases hf
+    · intro id' hsome
+      refine ⟨fun _ => ?_, fun f hf => by rw [hfan] at hf; cases hf⟩
+      have hbase : abstractHistory labels id' = some (rtHistory s id') := (hhist id' hsome).1 hfan
+      rw [abstractHistory_append id' labels [Label.register stream opts l₀ id e] hrun hbase]
+      show (match apply sA (Label.register stream opts l₀ id e) with
+            | some u => abstractHistoryFrom id' u
+                (afterLabel sA u id' (rtHistory s id') (Label.register stream opts l₀ id e)) []
+            | none => none) = _
+      rw [hapA]
+      show some (afterLabel sA sA id' (rtHistory s id') (Label.register stream opts l₀ id e)) = _
+      have hne : ¬ (id = id') := by
+        intro he
+        subst he
+        rw [hlkNone] at hsome
+        exact Bool.noConfusion hsome
+      show some (if id = id' then [observedOf sA id'] else rtHistory s id') = _
+      rw [if_neg hne]
+  · subst hs'
+    have hapA : apply sA (Label.register stream opts l₀ id e) = some
+        { sA with subs := sA.subs ++ [(id, newSubscriber stream opts l₀ st.messages)],
+                  nextId := id + 1 } := hab sA hcoreA hnext
+    refine ⟨labels ++ [Label.register stream opts l₀ id e], [],
+      ⟨_, runLabels_snoc hrun hapA, rfl, ?_, ?_, ?_⟩, ?_, hserial, fun _ => hnu⟩
+    · show (sA.subs ++ [(id, newSubscriber stream opts l₀ st.messages)]).map Prod.fst
+          = (s.subs ++ [(id, _)]).map Prod.fst
+      simp [List.map_append, hkeys]
+    · intro _
+      refine ⟨rfl, hcoreA, ?_⟩
+      intro id' r₁ hlkr
+      show ∃ a, lookupSub (sA.subs ++ [(id, newSubscriber stream opts l₀ st.messages)]) id' = some a
+        ∧ corrSub r₁ a
+      rw [lookupRt_append] at hlkr
+      rw [lookupSub_append]
+      cases hb : lookupRt s.subs id' with
+      | some b =>
+        rw [hb] at hlkr
+        cases hlkr
+        obtain ⟨a, hlka, hca⟩ := hcorr id' r₁ hb
+        rw [hlka]
+        exact ⟨a, rfl, hca⟩
+      | none =>
+        rw [hb] at hlkr
+        by_cases hii : id = id'
+        · rw [if_pos hii] at hlkr
+          cases hlkr
+          subst hii
+          rw [hlkNoneA, if_pos rfl]
+          refine ⟨_, rfl, corrSub_of_erase (fun hcl => ?_) ?_⟩
+          · rcases hcl with hcl | hcl
+            · exact Bool.noConfusion hcl
+            · exact QueueStatus.noConfusion hcl
+          · show newSubscriber stream opts l₀ st.messages = _
+            simp [newSubscriber, RtSubscriber.erase, EffectQueue.empty]
+        · rw [if_neg hii] at hlkr
+          cases hlkr
+    · intro f hf; rw [hfan] at hf; cases hf
+    · intro id' hsome
+      refine ⟨fun _ => ?_, fun f hf => by rw [hfan] at hf; cases hf⟩
+      obtain ⟨h₀, hh₀⟩ := abstractHistory_isSome id' labels hrun
+      rw [abstractHistory_append id' labels [Label.register stream opts l₀ id e] hrun hh₀]
+      show (match apply sA (Label.register stream opts l₀ id e) with
+            | some u => abstractHistoryFrom id' u
+                (afterLabel sA u id' h₀ (Label.register stream opts l₀ id e)) []
+            | none => none) = _
+      rw [hapA]
+      show some (if id = id' then
+          [observedOf { sA with
+              subs := sA.subs ++ [(id, newSubscriber stream opts l₀ st.messages)],
+              nextId := id + 1 } id'] else h₀) = _
+      by_cases hii : id = id'
+      · rw [if_pos hii]
+        subst hii
+        show some [observedOf _ id] = some (rtHistory _ id)
+        have hlkA : lookupSub (sA.subs ++ [(id, newSubscriber stream opts l₀ st.messages)]) id
+            = some (newSubscriber stream opts l₀ st.messages) := by
+          rw [lookupSub_append, hlkNoneA, if_pos rfl]
+        have hobs : observedOf { sA with
+            subs := sA.subs ++ [(id, newSubscriber stream opts l₀ st.messages)],
+            nextId := id + 1 } id = replayObserved st.messages opts := by
+          unfold observedOf
+          rw [hlkA]
+          rfl
+        rw [hobs]
+        show _ = some (rtHistory _ id)
+        unfold rtHistory
+        rw [lookupRt_append, hlkNone, if_pos rfl]
+      · rw [if_neg hii]
+        have hsome' : (lookupRt s.subs id').isSome = true := by
+          rw [lookupRt_append] at hsome
+          cases hb : lookupRt s.subs id' with
+          | some b => rfl
+          | none => rw [hb, if_neg hii] at hsome; exact Bool.noConfusion hsome
+        have hbase : abstractHistory labels id' = some (rtHistory s id') :=
+          (hhist id' hsome').1 hfan
+        rw [hh₀] at hbase
+        cases hbase
+        show _ = some (rtHistory _ id')
+        unfold rtHistory
+        rw [lookupRt_append]
+        cases hb : lookupRt s.subs id' with
+        | some b => rfl
+        | none => rw [hb] at hsome'; exact Bool.noConfusion hsome'
+
+
 end EffectNatsSubstrate
