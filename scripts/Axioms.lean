@@ -206,3 +206,5 @@ open EffectNatsSubstrate
 #print axioms applyOp_delete_each
 #print axioms applyOp_other_frame
 #print axioms applyOp_error_frame
+#print axioms pullStep_third_none
+#print axioms pull_third_none

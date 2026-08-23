@@ -41,7 +41,7 @@ still owes — and paying it at the end of the fan-out.
 | `RtReachable.lean` (to write) | per-label `RtInv` preservation, `rtInv_reachable`, `core_frame`, `core_reachable`, `pending_le_capacity_rt` | SB3, SB6, SB7 |
 | `RtCommute.lean` (to write) | `bindStep`, `commute_consumer_publisher`, `commute_consumers` | SB2 |
 | `SimRelation.lean` | `pointPassed`, `owedOp`, `corrSub`, `corrOn`, `OwedOk`, `Rel`, `RelHist` — the relation as definitions (proof-side; reshapeable) | the target of P4b |
-| `ApplyLemmas.lean` | `lookupSub_updateSub_ne`, `applyPull_other`, `applyUnsubscribe_other`, `applyOp_publish_each`, `applyOp_delete_each`, `applyOp_other_frame`, `applyOp_error_frame` (proved 2026-08-23, P4a) | the abstract independence lemmas |
+| `ApplyLemmas.lean` | `lookupSub_updateSub_ne`, `applyPull_other`, `applyUnsubscribe_other`, `applyOp_publish_each`, `applyOp_delete_each`, `applyOp_other_frame`, `applyOp_error_frame` (proved 2026-08-23, P4a); `pullStep_third_none`, `pull_third_none` (proved 2026-08-23, T2) | the abstract independence lemmas; the at-most-two-returning-pulls bound P5 rests on |
 | `SimProof.lean` (to write) | the abstract independence lemmas, the relation's preservation, `a4_inclusion`, `a4_complete` | SB4, SB5 |
 
 Dependency order: `EffectQueue → Runtime → RtInvariants → RtTraces → Sim → EffectQueueLaws →
