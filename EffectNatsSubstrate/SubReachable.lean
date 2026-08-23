@@ -189,20 +189,14 @@ theorem applyRegister_inv {s s' : SubState} {stream : StreamName} {opts : Consum
 
 theorem applyPull_inv {s s' : SubState} {id : SubId} (hinv : StateInv s)
     (h : applyPull pullStep s id = some s') : StateInv s' := by
-  unfold applyPull at h
-  split at h
-  · cases h
-  · rename_i sub hsub
-    split at h
-    · cases h
-    · rename_i sub' hpull
-      cases h
-      intro p hp
-      have hp' : p ∈ updateSub s.subs id (fun _ => sub') := hp
-      rcases mem_updateSub hp' with hold | ⟨_, _, hp2⟩
-      · exact (hinv p hold).core_eq rfl
-      · rw [hp2]
-        exact (pullStep_inv (hinv _ (mem_of_lookupSub hsub)) hpull).core_eq rfl
+  obtain ⟨sub, sub', hsub, hpull, heq⟩ := applyPull_ok_eq h
+  rw [heq]
+  intro p hp
+  have hp' : p ∈ updateSub s.subs id (fun _ => sub') := hp
+  rcases mem_updateSub hp' with hold | ⟨_, _, hp2⟩
+  · exact (hinv p hold).core_eq rfl
+  · rw [hp2]
+    exact (pullStep_inv (hinv _ (mem_of_lookupSub hsub)) hpull).core_eq rfl
 
 theorem applyUnsubscribe_inv {s s' : SubState} {id : SubId} (hinv : StateInv s)
     (h : applyUnsubscribe s id = some s') : StateInv s' := by
@@ -405,14 +399,11 @@ theorem apply_shape {s s' : SubState} {l : Label} (h : apply s l = some s') (hs 
         · cases h'
       · cases h'
   | pull id =>
-    have h' : applyPull pullStep s id = some s' := h
-    unfold applyPull at h'
-    split at h'
-    · cases h'
-    · split at h'
-      · cases h'
-      · cases h'
-        exact shape_of_keys hs (updateSub_keys _ _ _) (Nat.le_refl _)
+    obtain ⟨_, _, _, _, heq⟩ :=
+      applyPull_ok_eq (s' := s') (show applyPull pullStep s id = some s' from h)
+    refine shape_of_keys hs ?_ ?_
+    · rw [heq]; exact updateSub_keys _ _ _
+    · rw [heq]; exact Nat.le_refl _
   | unsubscribe id =>
     have h' : applyUnsubscribe s id = some s' := h
     unfold applyUnsubscribe at h'

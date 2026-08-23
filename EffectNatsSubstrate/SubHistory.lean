@@ -509,57 +509,51 @@ theorem histInv_pull {sH : SubStateH} {id : SubId} {base' : SubState} (hsinv : S
     (hinv : HistInv sH) (hx : apply sH.base (.pull id) = some base') :
     HistInv { base := base', committed := committedAfter sH (.pull id),
               regs := regsAfter sH (.pull id) } := by
-  have h' : applyPull pullStep sH.base id = some base' := hx
-  unfold applyPull at h'
-  split at h'
-  · cases h'
-  · rename_i sub hsub
-    split at h'
-    · cases h'
-    · rename_i sub' hpull
-      cases h'
-      refine ⟨hinv.coreCommitted, hinv.regsBelow, ?_⟩
-      intro p hp
-      have hp' : p ∈ updateSub sH.base.subs id (fun _ => sub') := hp
-      rcases mem_updateSub_eq hp' with hold | ⟨hpid, _, _, hp2⟩
-      · exact hinv.subs p hold
-      · obtain ⟨r, hr, hat, heq, hent⟩ := hinv.subs (id, sub) (mem_of_lookupSub hsub)
-        have hsubinv : SubInv sH.base sub := hsinv (id, sub) (mem_of_lookupSub hsub)
-        rw [hpid, hp2]
-        refine ⟨r, hr, hat, ?_, ?_⟩
-        · intro hreg
-          rcases pullStep_ok_eq hpull with ⟨e, hps, hpeq⟩ | ⟨_, _, hpeq⟩ | ⟨e, hps, _, hpeq⟩
-          · subst hpeq
-            have hreg' : sub.registered = true := hreg
-            have ho := hsubinv.registeredOpen hreg'
-            rw [hps] at ho
-            cases ho
-          · subst hpeq
-            have hreg' : sub.registered = true := hreg
-            rw [visible_drain]
-            exact heq hreg'
-          · subst hpeq
-            have hreg' : sub.registered = true := hreg
-            have ho := hsubinv.registeredOpen hreg'
-            rw [hps] at ho
-            cases ho
-        · intro m hm
-          rcases pullStep_ok_eq hpull with ⟨e, hps, hpeq⟩ | ⟨_, _, hpeq⟩ | ⟨e, hps, _, hpeq⟩
-          · subst hpeq
-            have hm' : Observed.entry m ∈ (sub.observed ++ [Observed.failed e]) ++
-                sub.pending.map Observed.entry := hm
-            rcases List.mem_append.mp hm' with hobs | hpend
-            · rcases List.mem_append.mp hobs with hobs' | hf
-              · exact hent m (List.mem_append.mpr (Or.inl hobs'))
-              · rw [List.mem_singleton] at hf
-                cases hf
-            · exact hent m (List.mem_append.mpr (Or.inr hpend))
-          · subst hpeq
-            rw [visible_drain] at hm
-            exact hent m hm
-          · subst hpeq
-            rw [visible_drain_done] at hm
-            exact hent m hm
+  obtain ⟨sub, sub', hsub, hpull, heq⟩ :=
+    applyPull_ok_eq (s' := base') (show applyPull pullStep sH.base id = some base' from hx)
+  subst heq
+  refine ⟨hinv.coreCommitted, hinv.regsBelow, ?_⟩
+  intro p hp
+  have hp' : p ∈ updateSub sH.base.subs id (fun _ => sub') := hp
+  rcases mem_updateSub_eq hp' with hold | ⟨hpid, _, _, hp2⟩
+  · exact hinv.subs p hold
+  · obtain ⟨r, hr, hat, heq, hent⟩ := hinv.subs (id, sub) (mem_of_lookupSub hsub)
+    have hsubinv : SubInv sH.base sub := hsinv (id, sub) (mem_of_lookupSub hsub)
+    rw [hpid, hp2]
+    refine ⟨r, hr, hat, ?_, ?_⟩
+    · intro hreg
+      rcases pullStep_ok_eq hpull with ⟨e, hps, hpeq⟩ | ⟨_, _, hpeq⟩ | ⟨e, hps, _, hpeq⟩
+      · subst hpeq
+        have hreg' : sub.registered = true := hreg
+        have ho := hsubinv.registeredOpen hreg'
+        rw [hps] at ho
+        cases ho
+      · subst hpeq
+        have hreg' : sub.registered = true := hreg
+        rw [visible_drain]
+        exact heq hreg'
+      · subst hpeq
+        have hreg' : sub.registered = true := hreg
+        have ho := hsubinv.registeredOpen hreg'
+        rw [hps] at ho
+        cases ho
+    · intro m hm
+      rcases pullStep_ok_eq hpull with ⟨e, hps, hpeq⟩ | ⟨_, _, hpeq⟩ | ⟨e, hps, _, hpeq⟩
+      · subst hpeq
+        have hm' : Observed.entry m ∈ (sub.observed ++ [Observed.failed e]) ++
+            sub.pending.map Observed.entry := hm
+        rcases List.mem_append.mp hm' with hobs | hpend
+        · rcases List.mem_append.mp hobs with hobs' | hf
+          · exact hent m (List.mem_append.mpr (Or.inl hobs'))
+          · rw [List.mem_singleton] at hf
+            cases hf
+        · exact hent m (List.mem_append.mpr (Or.inr hpend))
+      · subst hpeq
+        rw [visible_drain] at hm
+        exact hent m hm
+      · subst hpeq
+        rw [visible_drain_done] at hm
+        exact hent m hm
 
 theorem histInv_unsubscribe {sH : SubStateH} {id : SubId} {base' : SubState}
     (hinv : HistInv sH) (hx : apply sH.base (.unsubscribe id) = some base') :

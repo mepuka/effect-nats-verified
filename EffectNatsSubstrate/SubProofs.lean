@@ -42,6 +42,41 @@ theorem applyOp_core {s s' : SubState} {o : Op} {e : Expect}
     · cases h
   · cases h
 
+/-- A successful operation with an `.ok` expectation: the exact core step and the
+`afterOp` continuation. -/
+theorem applyOp_ok_eq {s s' : SubState} {o : Op} {r : Ret}
+    (h : applyOp deliverOne s o (.ok r) = some s') :
+    ∃ core', step s.core o = .ok (core', r) ∧ s' = afterOp deliverOne s core' o r := by
+  unfold applyOp at h
+  cases hstep : step s.core o with
+  | error err =>
+    rw [hstep] at h
+    simp at h
+  | ok p =>
+    obtain ⟨core', r₀⟩ := p
+    rw [hstep] at h
+    simp only at h
+    split at h
+    · rename_i hrr
+      cases h
+      subst hrr
+      exact ⟨core', rfl, rfl⟩
+    · cases h
+
+theorem applyPull_ok_eq {s s' : SubState} {id : SubId}
+    (h : applyPull pull s id = some s') :
+    ∃ sub sub', lookupSub s.subs id = some sub ∧ pull sub = some sub' ∧
+      s' = { s with subs := updateSub s.subs id (fun _ => sub') } := by
+  unfold applyPull at h
+  split at h
+  · cases h
+  · rename_i sub hsub
+    split at h
+    · cases h
+    · rename_i sub' hpull
+      cases h
+      exact ⟨sub, sub', hsub, hpull, rfl⟩
+
 theorem applyRegister_core {s s' : SubState} {stream : StreamName} {opts : ConsumeOptions}
     {l₀ : StreamSeq} {id : SubId} {e : Expect}
     (h : applyRegister s stream opts l₀ id e = some s') : s'.core = s.core := by
@@ -59,12 +94,8 @@ theorem applyRegister_core {s s' : SubState} {stream : StreamName} {opts : Consu
 
 theorem applyPull_core {s s' : SubState} {id : SubId}
     (h : applyPull pull s id = some s') : s'.core = s.core := by
-  unfold applyPull at h
-  split at h
-  · cases h
-  · split at h
-    · cases h
-    · cases h; rfl
+  obtain ⟨_, _, _, _, heq⟩ := applyPull_ok_eq h
+  rw [heq]
 
 theorem applyUnsubscribe_core {s s' : SubState} {id : SubId}
     (h : applyUnsubscribe s id = some s') : s'.core = s.core := by

@@ -28,25 +28,6 @@ abbrev publishedMessage (subject : SubjectName) (seq : StreamSeq) (payload : Pay
 
 /-! ## The subscriber a successful operation leaves behind -/
 
-theorem applyOp_ok_eq {s s' : SubState} {o : Op} {r : Ret}
-    (h : applyOp deliverOne s o (.ok r) = some s') :
-    ∃ core', step s.core o = .ok (core', r) ∧ s' = afterOp deliverOne s core' o r := by
-  unfold applyOp at h
-  cases hstep : step s.core o with
-  | error err =>
-    rw [hstep] at h
-    simp at h
-  | ok p =>
-    obtain ⟨core', r₀⟩ := p
-    rw [hstep] at h
-    simp only at h
-    split at h
-    · rename_i hrr
-      cases h
-      subst hrr
-      exact ⟨core', rfl, rfl⟩
-    · cases h
-
 theorem afterOp_publish_sub {s : SubState} {core' : JSState} {stream : StreamName}
     {subject : SubjectName} {payload : PayloadHash} {headers : List (String × String)}
     {x : Option StreamSeq} {now : Nat} {seq : StreamSeq} {id : SubId} {sub sub' : Subscriber}
