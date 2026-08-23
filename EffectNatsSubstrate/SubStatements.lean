@@ -399,73 +399,60 @@ theorem lagState_afterOp {s : SubState} {core' : JSState} {o : Op} {r : Ret}
     exact lagInv_endOne (hl q hq)
   · exact hl
 
+theorem lagState_applyOp {s s' : SubState} {o : Op} {e : Expect}
+    (hinv : StateInv s) (hl : LagState s) (h : applyOp deliverOne s o e = some s') :
+    LagState s' := by
+  cases e with
+  | ok r =>
+    obtain ⟨core', hstep, rfl⟩ := applyOp_ok_eq h
+    exact lagState_afterOp hinv hl
+  | error err =>
+    obtain ⟨heq, -⟩ := applyOp_error_eq h
+    rw [heq]
+    exact hl
+
+theorem lagState_applyRegister {s s' : SubState} {stream : StreamName} {opts : ConsumeOptions}
+    {l₀ : StreamSeq} {id : SubId} {e : Expect} (hinv : StateInv s) (hl : LagState s)
+    (h : applyRegister s stream opts l₀ id e = some s') : LagState s' := by
+  rcases applyRegister_ok_eq h with ⟨-, -, rfl⟩ | ⟨st, -, -, -, rfl⟩
+  · exact hl
+  · intro p hp
+    have hp' : p ∈ s.subs ++ [(id, newSubscriber stream opts l₀ st.messages)] := hp
+    rcases List.mem_append.mp hp' with hold | hnew
+    · exact hl p hold
+    · rw [List.mem_singleton.mp hnew]
+      exact lagInv_newSubscriber stream opts l₀ st.messages
+
+theorem lagState_applyPull {s s' : SubState} {id : SubId} (hinv : StateInv s) (hl : LagState s)
+    (h : applyPull pullStep s id = some s') : LagState s' := by
+  obtain ⟨sub, sub', hsub, hpull, rfl⟩ := applyPull_ok_eq h
+  intro p hp
+  rcases mem_updateSub hp with hold | ⟨_, _, hp2⟩
+  · exact hl p hold
+  · rw [hp2]
+    exact lagInv_pullStep (hinv _ (mem_of_lookupSub hsub)) (hl _ (mem_of_lookupSub hsub)) hpull
+
+theorem lagState_applyUnsubscribe {s s' : SubState} {id : SubId} (hl : LagState s)
+    (h : applyUnsubscribe s id = some s') : LagState s' := by
+  obtain ⟨sub, hsub, -, rfl⟩ := applyUnsubscribe_ok_eq h
+  intro p hp
+  rcases mem_updateSub hp with hold | ⟨sub₀, h₀, hp2⟩
+  · exact hl p hold
+  · rw [hp2]
+    exact lagInv_unsubscribe (hl _ h₀)
+
 theorem apply_lag {s s' : SubState} {l : Label} (hinv : StateInv s) (hl : LagState s)
     (h : apply s l = some s') : LagState s' := by
   cases l with
   | op o e =>
-    have h' : applyOp deliverOne s o e = some s' := h
-    unfold applyOp at h'
-    split at h'
-    · rename_i core' r r' hstep
-      split at h'
-      · cases h'; exact lagState_afterOp hinv hl
-      · cases h'
-    · rename_i err err' hstep
-      split at h'
-      · cases h'; exact hl
-      · cases h'
-    · cases h'
+    exact lagState_applyOp hinv hl (show applyOp deliverOne s o e = some s' from h)
   | register stream opts l₀ id e =>
-    have h' : applyRegister s stream opts l₀ id e = some s' := h
-    unfold applyRegister at h'
-    split at h'
-    · cases h'
-    · split at h'
-      · split at h'
-        · cases h'; exact hl
-        · cases h'
-      · split at h'
-        · cases h'
-          intro p hp
-          have hp' : p ∈ s.subs ++ [(id, newSubscriber stream opts l₀ _)] := hp
-          rcases List.mem_append.mp hp' with hold | hnew
-          · exact hl p hold
-          · rw [List.mem_singleton.mp hnew]
-            exact lagInv_newSubscriber _ _ _ _
-        · cases h'
-      · cases h'
+    exact lagState_applyRegister hinv hl
+      (show applyRegister s stream opts l₀ id e = some s' from h)
   | pull id =>
-    have h' : applyPull pullStep s id = some s' := h
-    unfold applyPull at h'
-    split at h'
-    · cases h'
-    · rename_i sub hsub
-      split at h'
-      · cases h'
-      · rename_i sub' hpull
-        cases h'
-        intro p hp
-        have hp' : p ∈ updateSub s.subs id (fun _ => sub') := hp
-        rcases mem_updateSub hp' with hold | ⟨_, _, hp2⟩
-        · exact hl p hold
-        · rw [hp2]
-          exact lagInv_pullStep (hinv _ (mem_of_lookupSub hsub)) (hl _ (mem_of_lookupSub hsub)) hpull
+    exact lagState_applyPull hinv hl (show applyPull pullStep s id = some s' from h)
   | unsubscribe id =>
-    have h' : applyUnsubscribe s id = some s' := h
-    unfold applyUnsubscribe at h'
-    split at h'
-    · cases h'
-    · rename_i sub hsub
-      split at h'
-      · cases h'
-      · cases h'
-        intro p hp
-        have hp' : p ∈ updateSub s.subs id
-            (fun sub => { sub with registered := false, pending := [], status := .shutDown }) := hp
-        rcases mem_updateSub hp' with hold | ⟨sub₀, h₀, hp2⟩
-        · exact hl p hold
-        · rw [hp2]
-          exact lagInv_unsubscribe (hl _ h₀)
+    exact lagState_applyUnsubscribe hl (show applyUnsubscribe s id = some s' from h)
 
 theorem lagState_reachable {s : SubState} (h : ReachableSub s) : LagState s :=
   reachableSub_all (fun _ hp => nomatch hp) (fun _ hinv hl hnext => apply_lag hinv hl hnext) h
