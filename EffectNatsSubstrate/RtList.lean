@@ -60,4 +60,46 @@ theorem updateRt_keys : ∀ (l : List (SubId × RtSubscriber)) (id : SubId)
     · simp only [updateRt, if_neg hi, List.map_cons, ih]
 
 
+/-- A successful lookup names a member of the list. -/
+theorem mem_of_lookupRt : ∀ (l : List (SubId × RtSubscriber)) (id : SubId) (r : RtSubscriber),
+    lookupRt l id = some r → (id, r) ∈ l := by
+  intro l
+  induction l with
+  | nil => intro id r h; cases h
+  | cons p rest ih =>
+    obtain ⟨i, sub⟩ := p
+    intro id r h
+    simp only [lookupRt] at h
+    by_cases hi : i = id
+    · rw [if_pos hi] at h
+      cases h
+      cases hi
+      exact List.Mem.head _
+    · rw [if_neg hi] at h
+      exact List.Mem.tail _ (ih id r h)
+
+/-- With strictly ascending ids, membership determines the lookup. -/
+theorem lookupRt_of_mem_pairwise :
+    ∀ (l : List (SubId × RtSubscriber)) (k : SubId) (r : RtSubscriber),
+      (l.map Prod.fst).Pairwise (· < ·) → (k, r) ∈ l → lookupRt l k = some r := by
+  intro l
+  induction l with
+  | nil => intro k r _ h; cases h
+  | cons p rest ih =>
+    obtain ⟨j, sub⟩ := p
+    intro k r hp h
+    rw [List.map_cons, List.pairwise_cons] at hp
+    obtain ⟨hlt, hrest⟩ := hp
+    rcases List.mem_cons.mp h with heq | hmem
+    · cases heq
+      simp [lookupRt]
+    · have hjk : j ≠ k := by
+        intro hj
+        have hmemk : k ∈ rest.map Prod.fst := List.mem_map.mpr ⟨(k, r), hmem, rfl⟩
+        have := hlt k hmemk
+        rw [hj] at this
+        exact Nat.lt_irrefl _ this
+      simp only [lookupRt, if_neg hjk]
+      exact ih k r hrest hmem
+
 end EffectNatsSubstrate
