@@ -14,3 +14,4 @@ import EffectNatsSubstrate.Next
 import EffectNatsSubstrate.SubTraces
 import EffectNatsSubstrate.SubInvariants
 import EffectNatsSubstrate.SubProofs
+import EffectNatsSubstrate.SubReachable

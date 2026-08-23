@@ -261,8 +261,8 @@ theorem unsubscribe_inv {s : SubState} {sub : Subscriber} (hinv : SubInv s sub) 
 
 /-! ## `SubInv` depends on the state only through its core -/
 
-theorem SubInv.core_eq {s s' : SubState} {sub : Subscriber} (h : s.core = s'.core)
-    (hinv : SubInv s sub) : SubInv s' sub := by
+theorem SubInv.core_eq {s s' : SubState} {sub : Subscriber} (hinv : SubInv s sub)
+    (h : s.core = s'.core) : SubInv s' sub := by
   refine ⟨hinv.capacityPos, hinv.capacity, hinv.registeredOpen, ?_, hinv.closingNonempty,
     hinv.doneEmpty, hinv.shutDownClear, hinv.pendingMatch, hinv.visibleStrict, hinv.visibleBound,
     hinv.pendingLast⟩
