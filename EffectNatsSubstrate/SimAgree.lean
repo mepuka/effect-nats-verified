@@ -1,4 +1,5 @@
 import EffectNatsSubstrate.ApplyLemmas
+import EffectNatsSubstrate.Sim
 import EffectNatsSubstrate.SubPlacements
 
 /-!
@@ -241,5 +242,78 @@ theorem observedOf_agreeAt {k : SubId} {s s' : SubState} (h : AgreeAt k s s') :
     observedOf s' k = observedOf s k := by
   unfold observedOf
   rw [h.2.2.2]
+
+/-! ## History invariance -/
+
+/-- Two states that agree at `k` give `k` the same history along any label list
+that contains no other subscriber's pull and no unsubscribe. -/
+theorem abstractHistoryFrom_agreeAt {k : SubId} :
+    ∀ (ls : List Label) {s s' : SubState} {h hist : History},
+      AgreeAt k s s' →
+      (∀ l ∈ ls, ∀ i, l = .pull i → i = k) →
+      (∀ l ∈ ls, ∀ i, l ≠ .unsubscribe i) →
+      abstractHistoryFrom k s h ls = some hist →
+      abstractHistoryFrom k s' h ls = some hist := by
+  intro ls
+  induction ls with
+  | nil =>
+    intro s s' h hist _ _ _ hrun
+    exact hrun
+  | cons l rest ih =>
+    intro s s' h hist hag hp hu hrun
+    have hrunE : abstractHistoryFrom k s h (l :: rest) =
+        match apply s l with
+        | some u => abstractHistoryFrom k u (afterLabel s u k h l) rest
+        | none => none := rfl
+    have goalE : abstractHistoryFrom k s' h (l :: rest) =
+        match apply s' l with
+        | some u => abstractHistoryFrom k u (afterLabel s' u k h l) rest
+        | none => none := rfl
+    rw [hrunE] at hrun
+    cases hap : apply s l with
+    | none =>
+      rw [hap] at hrun
+      simp at hrun
+    | some u =>
+      rw [hap] at hrun
+      obtain ⟨u', hu', htag⟩ := apply_agreeAt hag
+        (fun j hj => hp l (List.Mem.head _) j hj)
+        (fun j hj => hu l (List.Mem.head _) j hj) hap
+      have hafter : afterLabel s u k h l = afterLabel s' u' k h l := by
+        cases hl : l with
+        | op _ _ => rfl
+        | register _ _ _ j _ =>
+          show (if j = k then [observedOf u k] else h) =
+              (if j = k then [observedOf u' k] else h)
+          by_cases hjk : j = k
+          · rw [if_pos hjk, if_pos hjk, observedOf_agreeAt htag]
+          · rw [if_neg hjk, if_neg hjk]
+        | pull j =>
+          have hjk : j = k := hp l (List.Mem.head _) j hl
+          show (if j = k then h ++ [(observedOf u k).drop (observedOf s k).length] else h) =
+              (if j = k then h ++ [(observedOf u' k).drop (observedOf s' k).length] else h)
+          rw [if_pos hjk, if_pos hjk, observedOf_agreeAt htag, observedOf_agreeAt hag]
+        | unsubscribe j =>
+          exact absurd hl (hu l (List.Mem.head _) j)
+      have hstep' : abstractHistoryFrom k s' h (l :: rest)
+          = abstractHistoryFrom k u' (afterLabel s' u' k h l) rest := by
+        rw [goalE, hu']
+      rw [hstep', ← hafter]
+      exact ih (s := u) (s' := u') (h := afterLabel s u k h l) htag
+        (fun m hm j hj => hp m (List.Mem.tail _ hm) j hj)
+        (fun m hm j hj => hu m (List.Mem.tail _ hm) j hj)
+        hrun
+
+/-- Another subscriber's pull leaves `k`'s history unchanged: the history from
+`s` over `rest` equals the history from the state after the pull, when the pull
+is enabled and `rest` has no other subscriber's pull or unsubscribe. -/
+theorem abstractHistoryFrom_strip_pull {k i : SubId} {s t : SubState} {h hist : History}
+    {rest : List Label} (hik : i ≠ k)
+    (hpull : apply s (.pull i) = some t)
+    (hp : ∀ l ∈ rest, ∀ j, l = .pull j → j = k)
+    (hu : ∀ l ∈ rest, ∀ j, l ≠ .unsubscribe j)
+    (hrun : abstractHistoryFrom k t h rest = some hist) :
+    abstractHistoryFrom k s h rest = some hist :=
+  abstractHistoryFrom_agreeAt rest (agreeAt_symm (applyPull_agreeAt hik hpull)) hp hu hrun
 
 end EffectNatsSubstrate
