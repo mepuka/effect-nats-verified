@@ -388,7 +388,7 @@ theorem apply_shape {s s' : SubState} {l : Label} (h : apply s l = some s') (hs 
           refine ⟨?_, ?_⟩
           · show ((s.subs ++ [(id, _)]).map Prod.fst).Pairwise (· < ·)
             rw [List.map_append]
-            apply pairwise_lt_append_singleton hasc
+            apply pairwise_append_singleton hasc
             intro y hy
             obtain ⟨q, hq, hqy⟩ := List.mem_map.mp hy
             rw [← hqy, hid]

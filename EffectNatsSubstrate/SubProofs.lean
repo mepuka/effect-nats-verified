@@ -373,7 +373,7 @@ theorem deliverOne_inv {s s' : SubState} {stream : StreamName} {st : StreamState
           · exact hinv.pendingMatch m' hold
           · rw [List.mem_singleton.mp hnew]; exact hmatch
         · rw [hvis]
-          apply pairwise_lt_append_singleton hinv.visibleStrict
+          apply pairwise_append_singleton hinv.visibleStrict
           intro y hy
           have := hinv.visibleBound y hy
           rw [hseq]

@@ -1,5 +1,6 @@
 import EffectNatsSubstrate.SubInvariants
 import EffectNatsSubstrate.Invariants
+import EffectNatsSubstrate.Views
 
 /-!
 # Stage-A proof infrastructure
@@ -229,15 +230,6 @@ theorem visible_drain_done (sub : Subscriber) (e : SubError) :
                        status := QueueStatus.done e }
       = visible sub := by
   simp [visible]
-
-theorem pairwise_lt_append_singleton {l : List Nat} {x : Nat}
-    (h : l.Pairwise (· < ·)) (hx : ∀ y ∈ l, y < x) : (l ++ [x]).Pairwise (· < ·) := by
-  rw [List.pairwise_append]
-  refine ⟨h, List.pairwise_singleton _ _, ?_⟩
-  intro a ha b hb
-  simp only [List.mem_singleton] at hb
-  subst hb
-  exact hx a ha
 
 theorem pairwise_sublist_of_append_left {l₁ l₂ : List Nat}
     (h : (l₁ ++ l₂).Pairwise (· < ·)) : l₁.Pairwise (· < ·) :=
