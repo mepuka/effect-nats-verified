@@ -86,7 +86,8 @@ a committed publish — the published subject's view becomes
 
 [docs/signature-snapshot.md](docs/signature-snapshot.md) freezes the public proof surface
 (r1–r2.1 and stage A's r3.1 frozen); assurance reviews live in
-`docs/reviews/`.
+`docs/reviews/`; [docs/stage-a-proof-map.md](docs/stage-a-proof-map.md) explains how the
+stage-A proofs fit together and lists the maintenance cleanup still open.
 Naming follows the corpus conventions: distinct identifier names (`StreamName`, `SubjectName`,
 `StreamSeq`, `PayloadHash`), a deterministic `step` now with the nondeterministic `Next`
 relation reserved for the subscriber slice, and `step`/`Reachable` vocabulary compatible with
