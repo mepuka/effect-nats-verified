@@ -113,10 +113,18 @@ EffectNatsSubstrate/
   SubReachable.lean  reachability: two bootstrap inductions and reachableSub_all, which every later fact goes through
   SubStatements.lean SA4–SA7 and the negative witnesses
   SubHistory.lean    the ledger model and the global statement SA5h
+  SubPlacements.lean the free-running acceptance sets (chunk histories over every pull placement)
+  EffectQueue.lean   the Effect queue component (stage B1)
+  Runtime.lean       the runtime LTS at A4's step granularity
+  RtInvariants.lean  the runtime invariant
+  RtTraces.lean      the stage-B1 scenarios, checked by decide
+  Sim.lean           the stage-B1 statements: A4Inclusion, A4Complete
+  EffectQueueLaws.lean the queue laws Q1–Q3 as theorems (SB1)
 Main.lean            the fixture exporter
 ```
 
 [docs/signature-snapshot.md](docs/signature-snapshot.md) records the frozen theorem
 statements; a statement changes only through the slice document and the snapshot together.
 [docs/stage-a-proof-map.md](docs/stage-a-proof-map.md) explains how the stage-A proofs fit
-together. Reviews are under `docs/reviews/`.
+together; [docs/stage-b1-proof-map.md](docs/stage-b1-proof-map.md) does the same for stage B1 and
+holds the proof packets. Reviews are under `docs/reviews/`.

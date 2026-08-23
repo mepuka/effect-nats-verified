@@ -37,7 +37,7 @@ still owes — and paying it at the end of the fan-out.
 | `RtInvariants.lean` | `QueueInv`, `RtSubInv`, `FanOutInv`, `RtInv` | the invariant (clauses frozen) |
 | `RtTraces.lean` | `RtTrace`, `runRtSteps`, `finalRt`, `runRtTrace`, `runLabels`, the four scenarios, `allRtTraces` | kernel witnesses (proved) |
 | `Sim.lean` | `rtSerial`, `labelSerial`, `abstractHistoryFrom`, `abstractHistory`, `A4Inclusion`, `A4Complete` | the statements (frozen) |
-| `EffectQueueLaws.lean` (to write) | the nine SB1 theorems | queue laws |
+| `EffectQueueLaws.lean` | the nine SB1 theorems (proved 2026-08-23, P1) | queue laws |
 | `RtReachable.lean` (to write) | per-label `RtInv` preservation, `rtInv_reachable`, `core_frame`, `core_reachable`, `pending_le_capacity_rt` | SB3, SB6, SB7 |
 | `RtCommute.lean` (to write) | `bindStep`, `commute_consumer_publisher`, `commute_consumers` | SB2 |
 | `SimProof.lean` (to write) | the abstract independence lemmas, the relation, its preservation, `a4_inclusion`, `a4_complete` | SB4, SB5 |
