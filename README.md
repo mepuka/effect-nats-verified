@@ -112,6 +112,7 @@ EffectNatsSubstrate/
   SubProofs.lean     preservation of the invariant by each transition
   SubReachable.lean  reachability: two bootstrap inductions and reachableSub_all, which every later fact goes through
   ApplyLemmas.lean   the abstract independence lemmas behind a4_inclusion (stage-B1 P4a)
+  SimAgree.lean      agreement at one subscriber: the helpers a4_complete uses (stage-B1 P5a)
   SubStatements.lean SA4–SA7 and the negative witnesses
   SubHistory.lean    the ledger model and the global statement SA5h
   SubPlacements.lean the free-running acceptance sets (chunk histories over every pull placement)
