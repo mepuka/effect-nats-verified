@@ -420,3 +420,6 @@ open EffectNatsSubstrate
 #print axioms bindStep
 #print axioms commute_consumer_publisher
 #print axioms commute_consumers
+#print axioms sb2_witness
+#print axioms midFanOut1
+#print axioms sb2_same_subscriber_noncommuting
