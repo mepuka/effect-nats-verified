@@ -4,7 +4,7 @@ Executable Lean 4 reference model of the **sequential core** of effect-nats's in
 JetStream interpreter (`mepuka/effect-nats` @ `d06223f`): configuration, subject matching,
 stream storage, and the five non-streaming operations, with the sequential-core invariant
 proofs (T1–T7) and kernel-checked worked traces — and, since stage A (pin `872bd7f`, snapshot
-r3 proposed), the `TerminateOnLag` subscriber layer over that core: registration with every
+r3.1), the `TerminateOnLag` subscriber layer over that core: registration with every
 start position, bounded pending buffers, whole-buffer pulls, overflow-terminates, deletion,
 unsubscribe. Scope, corrected obligations, and deferrals are fixed by
 [the first-slice proposal](../../research/2026-08-22-first-slice-jetstream-memory-lean-model.md)
@@ -72,7 +72,8 @@ EffectNatsSubstrate/
   SubCore.lean     lookup and step-shape lemmas over the core
   SubProofs.lean   per-label preservation of SubInv; SA1 frame; selectReplay lemmas
   SubReachable.lean  the only ReachableSub induction: SA2 stateInv_reachable, SA3 pending_le_capacity
-  SubStatements.lean SA4–SA7 statements (snapshot r3, proposed)
+  SubStatements.lean SA4–SA7 and the negative witnesses (snapshot r3.1)
+  SubHistory.lean  SA5h: the history-extended model (proof-only ledger), AV1/AV2, visible_global
 Main.lean          exporter: lake exe effect_nats_traces → JSON fixture (the only module importing Lean)
 ```
 
@@ -84,7 +85,7 @@ a committed publish — the published subject's view becomes
 `Proofs.lean` works from those.
 
 [docs/signature-snapshot.md](docs/signature-snapshot.md) freezes the public proof surface
-(r1–r2.1 frozen; stage A's r3 proposed, pending owner ratification); assurance reviews live in
+(r1–r2.1 and stage A's r3.1 frozen); assurance reviews live in
 `docs/reviews/`.
 Naming follows the corpus conventions: distinct identifier names (`StreamName`, `SubjectName`,
 `StreamSeq`, `PayloadHash`), a deterministic `step` now with the nondeterministic `Next`

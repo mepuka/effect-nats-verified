@@ -34,11 +34,11 @@ proof bodies and proved helper lemmas may change freely.
   is declared in the proposal (§3.1) rather than modeled: `headerLookup` is first-match, the
   seam's `ReadonlyMap` has one value per key.
 
-- **r3 — proposed 2026-08-22, pending owner ratification** (slices plan slice 4, stage A): the
+- **r3 — proposed 2026-08-22; r3.1 ratified by the owner 2026-08-22 (late night)** (slices plan slice 4, stage A): the
   subscriber layer for `TerminateOnLag` buffers over the unchanged core, stated in the section
-  "Stage A (r3)" at the end of this file. Statements there are the freeze candidates; nothing in
+  "Stage A (r3.1)" at the end of this file. Statements there are frozen; nothing in
   r1–r2.1 changes. The transliteration pin of the new modules is effect-nats `872bd7f`.
-  **Revised 2026-08-22 to r3.1, still proposed**, after the review round over `61b3663..bedc54e`
+  **Revised 2026-08-22 to r3.1 and ratified the same night**, after the review round over `61b3663..bedc54e`
   (Standards/Spec review; `docs/reviews/assurance-review-stage-a-sa2-sa3.md` F1–F8 with its
   correction log; `research/2026-08-22-effect-nats-subscriber-stage-a-literature-referee.md`
   LR-01–08): `replayBound` and the eleven-clause `SubInv` recorded, `SubShape` added, SA4a/SA4c
@@ -223,7 +223,7 @@ state, and none should be added for it. `publish_ok_iff` is the success characte
 `publish_unbound`, `publish_rollup_denied`, and `publish_cas_mismatch` pin *which* error each
 failed gate raises, in the implementation's check order.
 
-## Stage A (r3.1) — proposed, pending owner ratification
+## Stage A (r3.1) — frozen; ratified by the owner 2026-08-22
 
 Source: `research/2026-08-22-subscriber-stage-a.md` (§3–§4 representation, §9.2 obligations);
 pin effect-nats `872bd7f` (`Subscriber.lean`, `SelectReplay.lean`, `Next.lean` headers cite the
@@ -231,7 +231,7 @@ lines). Prior art absorbed: `research/2026-08-22-lean-prior-art-session-automata
 closing map B (no mechanized source replaces the project-specific state; `decide` is the stable
 boundary for finite traces; structural induction + `simp`/`grind`/`omega` for the rest).
 
-### Carriers, labels, transition (freeze candidates)
+### Carriers, labels, transition (frozen with r3.1)
 
 ```text
 abbrev SubId := Nat
@@ -271,7 +271,7 @@ discharged by the stage-B bridge. `lastEnqueued₀` is admitted within `replayBo
 of memory's `nextSequence - 1` and live's last-replayed-or-`0`; SA4d pins memory's value. Boundary
 restrictions: `messages ≥ 1`; unique header keys and non-negative capacity as in r2.1.
 
-### Theorem statements (freeze candidates)
+### Theorem statements (frozen with r3.1)
 
 ```lean
 -- SA1 frame
@@ -323,13 +323,15 @@ theorem visible_sequences_strict {s : SubState} (h : ReachableSub s) :
 
 -- SA5h the global form on the history-extended model (SubHistory.lean; proof-only auxiliary state,
 -- never executed, traced, or exported — slice §9.2)
-structure RegInfo          -- at : Nat (committed.length at registration), prefix : List Observed
+structure RegInfo          -- index : Nat (committed.length at registration), initial : List Observed
+                           --   (`at` and `prefix` are Lean keywords)
 structure SubStateH        -- base : SubState, committed : List (StreamName × StoredMessage), regs : List (SubId × RegInfo)
 def erase (sH : SubStateH) : SubState := sH.base
+def lookupReg : List (SubId × RegInfo) → SubId → Option RegInfo
 def applyH : SubStateH → Label → Option SubStateH      -- apply on base, plus the history appends
 def initialSubH, NextH, ReachableSubH                 -- as initialSub / Next / ReachableSub, over applyH
 def liveEntries (sH : SubStateH) (id : SubId) : List StoredMessage
-     -- committed.drop r.at, this subscriber's stream, matching its filters, in order
+     -- committed.drop r.index, this subscriber's stream, matching its filters, in order
 theorem applyH_erase (sH : SubStateH) (l : Label) : (applyH sH l).map erase = apply (erase sH) l
 theorem erase_initialSubH : erase initialSubH = initialSub
 theorem applyH_lift {sH : SubStateH} {l : Label} {s' : SubState} (h : ReachableSubH sH)
@@ -337,7 +339,7 @@ theorem applyH_lift {sH : SubStateH} {l : Label} {s' : SubState} (h : ReachableS
 theorem reachableSub_lift {s : SubState} (h : ReachableSub s) : ∃ sH, ReachableSubH sH ∧ erase sH = s
 theorem visible_global {sH : SubStateH} (h : ReachableSubH sH) :
     ∀ p ∈ sH.base.subs, ∀ r, lookupReg sH.regs p.1 = some r → p.2.registered = true →
-      visible p.2 = r.prefix ++ (liveEntries sH p.1).map Observed.entry
+      visible p.2 = r.initial ++ (liveEntries sH p.1).map Observed.entry
 theorem entries_committed {sH : SubStateH} (h : ReachableSubH sH) :
     ∀ p ∈ sH.base.subs, ∀ m, Observed.entry m ∈ visible p.2 → (p.2.stream, m) ∈ sH.committed
 
@@ -354,6 +356,7 @@ theorem create_restarts {s raw s' st} (h : apply s (.op (.createStream raw) (.ok
 
 -- SA7 T13′
 theorem lagged_iff {s stream subject payload headers x now seq s' id sub sub' n}
+    (hreach : ReachableSub s)
     (h : apply s (.op (.publish stream subject payload headers x now) (.ok (.sequence seq))) = some s')
     (hb : lookupSub s.subs id = some sub) (ha : lookupSub s'.subs id = some sub')
     (hp : sub.policy = .terminateOnLag n) (hr : sub.registered = true) (hs : sub.stream = stream)
@@ -377,7 +380,7 @@ Approved edit regions after ratification: proof bodies in `SubProofs.lean`, `Sub
 `SubStatements.lean` and proved helper lemmas; changing any declaration above or a statement
 returns to the slice document.
 
-### Statement revision log (r3 → r3.1, both proposed)
+### Statement revision log (r3 proposed → r3.1 ratified)
 
 - `register_observed` — old: no state hypothesis; new: `(hs : SubShape s)`. Missing assumption:
   `lookupSub` returns the first match, so a `subs` already holding the key `nextId` (unreachable,
@@ -394,3 +397,27 @@ returns to the slice document.
   `all_sub_negatives`; `replayBound` and `SubShape` in the carriers block; the SA5h block
   (history-extended model, slice §9.2 — the global T8′ form the Pass A text stated, now over an
   Abadi–Lamport history variable with an erasure theorem). Downstream: none of SA1–SA3 changes.
+- `lagged_iff` — **post-ratification amendment (2026-08-22, late night), owner approval
+  requested**: old: no state hypothesis; new: `(hreach : ReachableSub s)`. Missing assumption:
+  without it a registered subscriber already in `closing (consumerLagged …)` — unreachable by
+  `registeredOpen`, but expressible — satisfies the left side with `pending.length < n`, and an
+  over-full buffer — unreachable by `capacity` — overflows with `pending.length ≠ n`. The
+  reachable form is the T13′ statement of the slice document (§9.2).
+- Representation details fixed while proving: `RegInfo`'s fields are `index`/`initial` (`at`
+  and `prefix` are Lean keywords); `applyH_lift`'s reachability hypothesis is unused by its
+  proof and bound as `_h` (type unchanged); the negative witnesses carry one extra case,
+  `register-inadmissible-lastEnqueued`, exercising `replayBound`.
+- **Proved 2026-08-22 (late night), the commit after ratification:** every statement of this
+  section — SA1–SA4 (`reachableSub_core`, `stateInv_reachable`, `pending_le_capacity`,
+  `subShape_reachable`, `sub_core_inv`, `register_observed`, `selectReplay_mem`,
+  `selectReplay_lastPerSubject`, `memory_lastEnqueued_admissible`), SA5 (`pull_visible`,
+  `publish_visible`, `op_visible_frame`, `visible_sequences_strict`), SA6 (`delete_ends`,
+  `create_restarts`), SA7 (`lagged_iff`, `lagged_carries_last_observed`), the traces and
+  negative witnesses (`all_sub_traces`, `w1_fails_drain`, `w2_fails_lag`, `all_sub_negatives`),
+  and SA5h (`erase_initialSubH`, `applyH_erase`, `applyH_lift`, `reachableSub_lift`,
+  `visible_global`, `entries_committed`) — closes under the standard axioms
+  (`#print axioms`; `erase_initialSubH` under none). Modules: `SubReachable` (the one
+  `ReachableSub` induction, `reachableSub_all`, the shape theorem), `SubStatements` (SA4–SA7,
+  the lag invariant `LagInv`, the negatives), `SubHistory` (SA5h through the ledger invariant
+  `HistInv`). SA7 goes through `LagInv` (a separate per-subscriber predicate proved with
+  `reachableSub_all`, not a widening of `SubInv`).

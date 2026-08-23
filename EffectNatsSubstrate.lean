@@ -15,3 +15,5 @@ import EffectNatsSubstrate.SubTraces
 import EffectNatsSubstrate.SubInvariants
 import EffectNatsSubstrate.SubProofs
 import EffectNatsSubstrate.SubReachable
+import EffectNatsSubstrate.SubStatements
+import EffectNatsSubstrate.SubHistory

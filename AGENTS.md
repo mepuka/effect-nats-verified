@@ -27,7 +27,7 @@ document, never the other way around.
   histories, never "equivalence". A trace's `mirrors` labels are unchecked metadata, not
   evidence.
 - **Deferred means absent.** `TerminateOnLag` subscribers entered through the stage-A slice
-  document (`pending`, `lastEnqueued`, a status, an explicit `pull`; snapshot r3, proposed).
+  document (`pending`, `lastEnqueued`, a status, an explicit `pull`; snapshot r3.1, frozen 2026-08-22).
   Still absent, not stubbed: `PullWindow` and its `Blocked` state, the `EffectQueue` runtime
   model that discharges Q1–Q3 and the quiescence assumption A4 (stage B), JSONL trace
   ingestion, payload hashing, `.nuscr` printing. Each enters only through a new slice

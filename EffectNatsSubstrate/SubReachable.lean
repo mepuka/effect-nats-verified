@@ -210,4 +210,216 @@ theorem pending_le_capacity {s : SubState} (h : ReachableSub s) :
     ∀ p ∈ s.subs, p.2.pending.length ≤ p.2.policy.capacity :=
   fun p hp => (stateInv_reachable h p hp).capacity
 
+/-- The one induction principle every further reachable-state fact goes through
+(package `AGENTS.md`): the step case may assume the pre-state is reachable and
+satisfies `StateInv`. -/
+theorem reachableSub_all {P : SubState → Prop} (hinit : P initialSub)
+    (hstep : ∀ {s s' : SubState} {l : Label}, ReachableSub s → StateInv s → P s →
+      apply s l = some s' → P s')
+    {s : SubState} (h : ReachableSub s) : P s := by
+  induction h with
+  | init => exact hinit
+  | step hr hnext ih => exact hstep hr (stateInv_reachable hr) ih hnext
+
+/-! ## `lookupSub` through `updateSub`, appends, and value maps -/
+
+theorem lookupSub_updateSub_self :
+    ∀ {subs : List (SubId × Subscriber)} {id : SubId} {sub : Subscriber}
+      (f : Subscriber → Subscriber),
+      lookupSub subs id = some sub → lookupSub (updateSub subs id f) id = some (f sub)
+  | [], _, _, _, h => by cases h
+  | (i, s₀) :: rest, id, sub, f, h => by
+    by_cases hi : i = id
+    · subst hi
+      simp only [lookupSub] at h
+      cases h
+      simp [updateSub, lookupSub]
+    · simp only [lookupSub, if_neg hi] at h
+      simp only [updateSub, if_neg hi, lookupSub]
+      exact lookupSub_updateSub_self f h
+
+theorem lookupSub_none_of_fresh :
+    ∀ {subs : List (SubId × Subscriber)} {id : SubId},
+      (∀ p ∈ subs, p.1 ≠ id) → lookupSub subs id = none
+  | [], _, _ => rfl
+  | (i, s₀) :: rest, id, h => by
+    have hi : i ≠ id := h (i, s₀) List.mem_cons_self
+    simp only [lookupSub, if_neg hi]
+    exact lookupSub_none_of_fresh (fun p hp => h p (List.mem_cons_of_mem _ hp))
+
+theorem lookupSub_append_fresh :
+    ∀ {subs : List (SubId × Subscriber)} {id : SubId} {sub : Subscriber},
+      (∀ p ∈ subs, p.1 ≠ id) → lookupSub (subs ++ [(id, sub)]) id = some sub
+  | [], _, _, _ => by simp [lookupSub]
+  | (i, s₀) :: rest, id, sub, hfresh => by
+    have hi : i ≠ id := hfresh (i, s₀) List.mem_cons_self
+    simp only [List.cons_append, lookupSub, if_neg hi]
+    exact lookupSub_append_fresh (fun p hp => hfresh p (List.mem_cons_of_mem _ hp))
+
+/-- Looking up through a value map. -/
+theorem lookupSub_map :
+    ∀ {subs : List (SubId × Subscriber)} {id : SubId} (g : Subscriber → Subscriber),
+      lookupSub (subs.map (fun p => (p.1, g p.2))) id = (lookupSub subs id).map g
+  | [], _, _ => rfl
+  | (i, s₀) :: rest, id, g => by
+    by_cases hi : i = id
+    · simp only [List.map_cons, lookupSub, if_pos hi]
+      rfl
+    · simp only [List.map_cons, lookupSub, if_neg hi]
+      exact lookupSub_map g
+
+/-- With strictly ascending ids, membership determines the lookup. -/
+theorem lookupSub_of_mem_pairwise :
+    ∀ {subs : List (SubId × Subscriber)} {id : SubId} {sub : Subscriber},
+      (subs.map Prod.fst).Pairwise (· < ·) → (id, sub) ∈ subs → lookupSub subs id = some sub
+  | [], _, _, _, h => by cases h
+  | (i, s₀) :: rest, id, sub, hp, h => by
+    rw [List.map_cons, List.pairwise_cons] at hp
+    obtain ⟨hlt, hrest⟩ := hp
+    rcases List.mem_cons.mp h with heq | hmem
+    · cases heq
+      simp [lookupSub]
+    · have hi : i ≠ id := by
+        intro hi
+        have hmemid : id ∈ rest.map Prod.fst := List.mem_map.mpr ⟨(id, sub), hmem, rfl⟩
+        have := hlt id hmemid
+        rw [hi] at this
+        exact Nat.lt_irrefl _ this
+      simp only [lookupSub, if_neg hi]
+      exact lookupSub_of_mem_pairwise hrest hmem
+
+theorem updateSub_keys :
+    ∀ (subs : List (SubId × Subscriber)) (id : SubId) (f : Subscriber → Subscriber),
+      (updateSub subs id f).map Prod.fst = subs.map Prod.fst
+  | [], _, _ => rfl
+  | (i, s₀) :: rest, id, f => by
+    by_cases hi : i = id
+    · simp only [updateSub, if_pos hi, List.map_cons]
+      rw [updateSub_keys rest id f]
+    · simp only [updateSub, if_neg hi, List.map_cons]
+      rw [updateSub_keys rest id f]
+
+theorem keys_map_snd :
+    ∀ (l : List (SubId × Subscriber)) (g : SubId × Subscriber → Subscriber),
+      (l.map (fun p => (p.1, g p))).map Prod.fst = l.map Prod.fst
+  | [], _ => rfl
+  | p :: rest, g => by
+    show p.1 :: (rest.map (fun p => (p.1, g p))).map Prod.fst = p.1 :: rest.map Prod.fst
+    rw [keys_map_snd rest g]
+
+/-! ## The enabling condition of `register` -/
+
+/-- A successful registration is for the next id with a positive capacity. -/
+theorem applyRegister_enabled {s s' : SubState} {stream : StreamName} {opts : ConsumeOptions}
+    {l₀ : StreamSeq} {id : SubId} {e : Expect}
+    (h : applyRegister s stream opts l₀ id e = some s') :
+    id = s.nextId ∧ opts.buffer.capacity ≠ 0 := by
+  unfold applyRegister at h
+  split at h
+  · cases h
+  · rename_i hguard
+    refine ⟨?_, ?_⟩
+    · by_cases hne : id = s.nextId
+      · exact hne
+      · exfalso
+        apply hguard
+        simp [hne]
+    · intro hz
+      apply hguard
+      simp [hz]
+
+/-! ## The state shape is preserved and holds on every reachable state -/
+
+theorem shape_of_keys {s s' : SubState} (hs : SubShape s)
+    (hk : s'.subs.map Prod.fst = s.subs.map Prod.fst) (hn : s.nextId ≤ s'.nextId) :
+    SubShape s' := by
+  obtain ⟨hasc, hids⟩ := hs
+  refine ⟨by rw [hk]; exact hasc, ?_⟩
+  intro p hp
+  have hmem : p.1 ∈ s'.subs.map Prod.fst := List.mem_map.mpr ⟨p, hp, rfl⟩
+  rw [hk] at hmem
+  obtain ⟨q, hq, hqp⟩ := List.mem_map.mp hmem
+  rw [← hqp]
+  exact Nat.lt_of_lt_of_le (hids q hq) hn
+
+theorem apply_shape {s s' : SubState} {l : Label} (h : apply s l = some s') (hs : SubShape s) :
+    SubShape s' := by
+  cases l with
+  | op o e =>
+    have h' : applyOp deliverOne s o e = some s' := h
+    unfold applyOp at h'
+    split at h'
+    · rename_i core' r r' hstep
+      split at h'
+      · cases h'
+        unfold afterOp
+        split
+        · exact shape_of_keys hs (keys_map_snd _ _) (Nat.le_refl _)
+        · exact shape_of_keys hs (keys_map_snd _ _) (Nat.le_refl _)
+        · exact shape_of_keys hs rfl (Nat.le_refl _)
+      · cases h'
+    · rename_i err err' hstep
+      split at h'
+      · cases h'; exact hs
+      · cases h'
+    · cases h'
+  | register stream opts l₀ id e =>
+    have h' : applyRegister s stream opts l₀ id e = some s' := h
+    obtain ⟨hid, _⟩ := applyRegister_enabled h'
+    unfold applyRegister at h'
+    split at h'
+    · cases h'
+    · split at h'
+      · split at h'
+        · cases h'; exact hs
+        · cases h'
+      · split at h'
+        · cases h'
+          obtain ⟨hasc, hids⟩ := hs
+          refine ⟨?_, ?_⟩
+          · show ((s.subs ++ [(id, _)]).map Prod.fst).Pairwise (· < ·)
+            rw [List.map_append]
+            apply pairwise_lt_append_singleton hasc
+            intro y hy
+            obtain ⟨q, hq, hqy⟩ := List.mem_map.mp hy
+            rw [← hqy, hid]
+            exact hids q hq
+          · intro p hp
+            have hp' : p ∈ s.subs ++ [(id, _)] := hp
+            rcases List.mem_append.mp hp' with hold | hnew
+            · show p.1 < id + 1
+              have := hids p hold
+              rw [← hid] at this
+              exact Nat.lt_succ_of_lt this
+            · rw [List.mem_singleton.mp hnew]
+              exact Nat.lt_succ_self id
+        · cases h'
+      · cases h'
+  | pull id =>
+    have h' : applyPull pullStep s id = some s' := h
+    unfold applyPull at h'
+    split at h'
+    · cases h'
+    · split at h'
+      · cases h'
+      · cases h'
+        exact shape_of_keys hs (updateSub_keys _ _ _) (Nat.le_refl _)
+  | unsubscribe id =>
+    have h' : applyUnsubscribe s id = some s' := h
+    unfold applyUnsubscribe at h'
+    split at h'
+    · cases h'
+    · split at h'
+      · cases h'
+      · cases h'
+        exact shape_of_keys hs (updateSub_keys _ _ _) (Nat.le_refl _)
+
+/-- The state shape holds on every reachable state: ids strictly ascending, all below `nextId`. -/
+theorem subShape_reachable {s : SubState} (h : ReachableSub s) : SubShape s :=
+  reachableSub_all ⟨List.Pairwise.nil, fun _ hp => nomatch hp⟩
+    (fun _ _ hs hnext => apply_shape hnext hs) h
+
+theorem lookupSub_nextId {s : SubState} (hs : SubShape s) : lookupSub s.subs s.nextId = none :=
+  lookupSub_none_of_fresh (fun p hp => Nat.ne_of_lt (hs.2 p hp))
+
 end EffectNatsSubstrate
