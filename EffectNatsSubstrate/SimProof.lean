@@ -2193,4 +2193,314 @@ theorem rel_step_register {s s' : RtState} {stream : StreamName} {opts : Consume
         | none => rw [hb] at hsome'; exact Bool.noConfusion hsome'
 
 
+theorem not_closed_of_registered {s : RtState} {r : RtSubscriber} (hsub : RtSubInv s r)
+    (h : r.registered = true) : ¬ Closed r := by
+  rintro (hcl | hcl)
+  · rw [(hsub.closeStartedOpen hcl).1] at h
+    exact Bool.noConfusion h
+  · rw [(hsub.registeredOpen h).1] at hcl
+    exact QueueStatus.noConfusion hcl
+
+theorem lookupRt_isSome_of_keys {rs : List (SubId × RtSubscriber)} {as : List (SubId × Subscriber)}
+    (hkeys : as.map Prod.fst = rs.map Prod.fst) :
+    ∀ id a, lookupSub as id = some a → ∃ r, lookupRt rs id = some r := by
+  induction rs generalizing as with
+  | nil =>
+    intro id a h
+    cases as with
+    | nil => cases h
+    | cons q qs => simp at hkeys
+  | cons p rest ih =>
+    obtain ⟨i, sub⟩ := p
+    cases as with
+    | nil => intro id a h; cases h
+    | cons q qs =>
+      obtain ⟨j, b⟩ := q
+      simp only [List.map_cons, List.cons.injEq] at hkeys
+      obtain ⟨hij, htl⟩ := hkeys
+      intro id a h
+      simp only [lookupSub] at h
+      by_cases hj : j = id
+      · exact ⟨sub, by simp only [lookupRt, if_pos (hij.symm.trans hj)]⟩
+      · rw [if_neg hj] at h
+        have hij' : ¬ i = id := fun he => hj (hij.trans he)
+        obtain ⟨r, hr⟩ := ih (as := qs) htl id a h
+        exact ⟨r, by simp only [lookupRt, if_neg hij']; exact hr⟩
+
+/-- A runtime step that only advances the core. -/
+theorem rel_op_plain {s : RtState} {core' : JSState} {labels : List Label} {o : Op} {e : Expect}
+    {sA sA' : SubState}
+    (hfan : s.fanOut = none)
+    (hrun : runLabels initialSub labels = some sA)
+    (hnext : sA.nextId = s.nextId) (hkeys : sA.subs.map Prod.fst = s.subs.map Prod.fst)
+    (hcorr : CorrAll s sA) (hhist : RelHist s labels [])
+    (hapA : apply sA (.op o e) = some sA')
+    (hsub : sA'.subs = sA.subs) (hnextA : sA'.nextId = sA.nextId) (hcoreA' : sA'.core = core') :
+    RelStep { s with core := core' } labels [] [Label.op o e] (.op o e) := by
+  refine ⟨labels ++ [Label.op o e], [], ⟨sA', runLabels_snoc hrun hapA, ?_, ?_, ?_, ?_⟩, ?_, ?_, ?_⟩
+  · rw [hnextA, hnext]
+  · rw [hsub, hkeys]
+  · intro _
+    refine ⟨rfl, hcoreA', ?_⟩
+    intro id r₀ hlkr
+    obtain ⟨a, hlka, hca⟩ := hcorr id r₀ hlkr
+    exact ⟨a, by rw [hsub]; exact hlka, hca⟩
+  · intro f hf
+    rw [hfan] at hf
+    cases hf
+  · intro id hsome
+    refine ⟨fun _ => ?_, fun f hf => by rw [hfan] at hf; cases hf⟩
+    have hbase : abstractHistory labels id = some (rtHistory s id) := (hhist id hsome).1 hfan
+    rw [abstractHistory_append id labels [Label.op o e] hrun hbase]
+    show (match apply sA (Label.op o e) with
+          | some u => abstractHistoryFrom id u (afterLabel sA u id (rtHistory s id) (.op o e)) []
+          | none => none) = _
+    rw [hapA]
+    rfl
+  · simp [labelSerial_append, labelSerial]
+  · intro _ hnl _
+    exact ⟨noUnsub_append hnl (noUnsub_single (fun j hc => Label.noConfusion hc)),
+      fun l hl => by cases hl⟩
+
+
+/-- A runtime step that opens a fan-out: the abstract operation becomes the owed label. -/
+theorem rel_op_fanout {s : RtState} {core' : JSState} {labels : List Label} {o : Op} {e : Expect}
+    {sA sPost : SubState} {k : FanKind} {ids : List SubId}
+    (hfan : s.fanOut = none)
+    (hrun : runLabels initialSub labels = some sA)
+    (hnext : sA.nextId = s.nextId) (hkeys : sA.subs.map Prod.fst = s.subs.map Prod.fst)
+    (hcorr : CorrAll s sA) (hhist : RelHist s labels [])
+    (hmem : ∀ id a, lookupSub sA.subs id = some a → isTargetOf k a = true → id ∈ ids)
+    (hsched : ∀ id, id ∈ ids → ∀ a, lookupSub sA.subs id = some a →
+        a.status = .shutDown ∨ isTargetOf k a = true)
+    (hrcore : RelCore { kind := k, remaining := ids, decided := none, visited := [] } sA
+        { s with
+            core := core',
+            fanOut := some { kind := k, remaining := ids, decided := none, visited := [] } })
+    (hopA : apply sA (owedOp k) = some sPost)
+    (hserial : labelSerial [owedOp k] = [Label.op o e]) :
+    RelStep { s with
+        core := core',
+        fanOut := some { kind := k, remaining := ids, decided := none, visited := [] } }
+      labels [] [Label.op o e] (.op o e) := by
+  have hpp : ∀ id,
+      pointPassed { kind := k, remaining := ids, decided := none, visited := [] } id = false :=
+    fun _ => rfl
+  refine ⟨labels, [owedOp k], ⟨sA, hrun, hnext, hkeys, ?_, ?_⟩, ?_, ?_, ?_⟩
+  · intro hq
+    cases hq
+  · intro f hf
+    obtain rfl : { kind := k, remaining := ids, decided := none, visited := [] } = f :=
+      Option.some.inj hf
+    refine ⟨fun id _ => rfl, ?_, hrcore, ?_, [], sPost, rfl, (fun l hl => by cases hl), ?_, ?_⟩
+    · intro id a hlka _
+      refine ⟨?_, ?_⟩
+      · cases htgt : isTargetOf k a with
+        | true => exact Or.inl (Or.inl (hmem id a hlka htgt))
+        | false => exact Or.inr rfl
+      · rintro (hs | ⟨b, hb⟩)
+        · exact hsched id hs a hlka
+        · cases hb
+    · intro id r₀ hlkr _
+      exact hcorr id r₀ hlkr
+    · rw [runLabels_single]
+      exact hopA
+    · intro id r₀ _ hp
+      rw [hpp id] at hp
+      exact Bool.noConfusion hp
+  · intro id hsome
+    refine ⟨(fun hq => by cases hq), fun f hf => ?_⟩
+    obtain rfl : { kind := k, remaining := ids, decided := none, visited := [] } = f :=
+      Option.some.inj hf
+    refine ⟨(fun hp => by rw [hpp id] at hp; exact Bool.noConfusion hp), fun _ => ?_⟩
+    exact (hhist id hsome).1 hfan
+  · rw [hserial]
+    simp [labelSerial]
+  · intro _ hnl _
+    exact ⟨hnl, noUnsub_single (fun j => owedOp_ne_unsubscribe k j)⟩
+
+
+/-- The abstract subscriber of a runtime one that a fan-out targets. -/
+theorem corr_erase_of_target {s : RtState} {sA : SubState} {id : SubId} {a : Subscriber}
+    {r : RtSubscriber} (hcorr : CorrAll s sA) (hlkr : lookupRt s.subs id = some r)
+    (hlka : lookupSub sA.subs id = some a) (hreg : a.registered = true) : a = r.erase := by
+  obtain ⟨b, hlkb, hcb⟩ := hcorr id r hlkr
+  rw [hlka] at hlkb
+  cases hlkb
+  refine hcb.2 (fun hcl => ?_)
+  rw [(hcb.1 hcl).2.1] at hreg
+  exact Bool.noConfusion hreg
+
+theorem rel_step_op {s s' : RtState} {o : Op} {e : Expect} (hinv : RtInv s)
+    (hstep : rtOp s o e = some s') {labels owed : List Label}
+    (hrel : Rel s labels owed) (hhist : RelHist s labels owed) :
+    RelStep s' labels owed [Label.op o e] (.op o e) := by
+  unfold rtOp at hstep
+  split at hstep
+  · cases hstep
+  · rename_i hfs
+    have hfan : s.fanOut = none := by
+      cases hf : s.fanOut with
+      | none => rfl
+      | some f => rw [hf] at hfs; exact absurd rfl hfs
+    obtain ⟨sA, hrun, hnext, hkeys, hquiet, -⟩ := hrel
+    obtain ⟨howed, hcoreA, hcorr⟩ := hquiet hfan
+    subst howed
+    cases hst : step s.core o with
+    | error err =>
+      cases e with
+      | ok r' => simp only [hst] at hstep; cases hstep
+      | error err' =>
+        simp only [hst] at hstep
+        split at hstep
+        · rename_i heq
+          cases hstep
+          subst heq
+          have hapA : apply sA (.op o (.error err)) = some sA :=
+            applyOp_error_of_step (by rw [hcoreA]; exact hst)
+          exact (show RelStep { s with core := s.core } labels [] [Label.op o (.error err)]
+              (.op o (.error err)) from
+            rel_op_plain hfan hrun hnext hkeys hcorr hhist hapA rfl rfl hcoreA)
+        · cases hstep
+    | ok p =>
+      obtain ⟨core', r⟩ := p
+      cases e with
+      | error err' => simp only [hst] at hstep; cases hstep
+      | ok r' =>
+        simp only [hst] at hstep
+        split at hstep
+        · cases hstep
+        · rename_i hrr
+          have hrr' : r = r' := Classical.byContradiction hrr
+          subst hrr'
+          have hstA : step sA.core o = .ok (core', r) := by rw [hcoreA]; exact hst
+          have hapA : apply sA (.op o (.ok r)) = some (afterOp deliverOne sA core' o r) :=
+            applyOp_ok_of_step hstA
+          cases o with
+          | publish stream subject payload headers el now =>
+            cases r with
+            | sequence seq =>
+              simp only at hstep
+              cases hstep
+              refine rel_op_fanout (k := .publish stream
+                  { subject := subject, sequence := seq, payload := payload, headers := headers,
+                    timestampMillis := now } el)
+                hfan hrun hnext hkeys hcorr hhist ?_ ?_ ?_ hapA rfl
+              · intro id a hlka htgt
+                obtain ⟨r₀, hlkr⟩ := lookupRt_isSome_of_keys hkeys id a hlka
+                have hreg : a.registered = true := isTargetOf_publish_registered htgt
+                have hae : a = r₀.erase := corr_erase_of_target hcorr hlkr hlka hreg
+                have h3 : (a.stream == stream) = true ∧ a.registered = true ∧
+                    matchesAny a.filters subject = true := by
+                  have h' : (a.stream == stream && a.registered &&
+                      matchesAny a.filters subject) = true := htgt
+                  simp only [Bool.and_eq_true] at h'
+                  exact ⟨h'.1.1, h'.1.2, h'.2⟩
+                rw [hae] at h3
+                show id ∈ (s.subs.filter (fun p => p.2.registered && p.2.stream == stream &&
+                  matchesAny p.2.filters subject)).map Prod.fst
+                refine List.mem_map.mpr ⟨(id, r₀),
+                  List.mem_filter.mpr ⟨mem_of_lookupRt s.subs id r₀ hlkr, ?_⟩, rfl⟩
+                show (r₀.registered && r₀.stream == stream &&
+                  matchesAny r₀.filters subject) = true
+                simp only [Bool.and_eq_true]
+                exact ⟨⟨h3.2.1, h3.1⟩, h3.2.2⟩
+              · intro id hid a hlka
+                obtain ⟨q, hq, hq1⟩ := List.mem_map.mp hid
+                obtain ⟨hqmem, hpred⟩ := List.mem_filter.mp hq
+                have hlkr : lookupRt s.subs id = some q.2 := by
+                  rw [← hq1]
+                  exact lookupRt_of_mem_pairwise s.subs q.1 q.2 hinv.shape.1 hqmem
+                have h3 : q.2.registered = true ∧ (q.2.stream == stream) = true ∧
+                    matchesAny q.2.filters subject = true := by
+                  simp only [Bool.and_eq_true] at hpred
+                  exact ⟨hpred.1.1, hpred.1.2, hpred.2⟩
+                have hae : a = q.2.erase :=
+                  corr_erase_of_target hcorr hlkr hlka (by
+                    obtain ⟨b, hlkb, hcb⟩ := hcorr id q.2 hlkr
+                    rw [hlka] at hlkb
+                    cases hlkb
+                    rw [hcb.2 (not_closed_of_registered (rtSubInv_of_lookup hinv hlkr) h3.1)]
+                    exact h3.1)
+                refine Or.inr ?_
+                show (a.stream == stream && a.registered && matchesAny a.filters subject) = true
+                rw [hae]
+                simp only [Bool.and_eq_true]
+                exact ⟨⟨h3.2.1, h3.1⟩, h3.2.2⟩
+              · exact ⟨(fun stream' m' el' hk => by cases hk; exact hstA),
+                  (fun name hk => by cases hk)⟩
+            | unit =>
+              simp only at hstep
+              cases hstep
+              exact rel_op_plain hfan hrun hnext hkeys hcorr hhist hapA rfl rfl rfl
+            | config c =>
+              simp only at hstep
+              cases hstep
+              exact rel_op_plain hfan hrun hnext hkeys hcorr hhist hapA rfl rfl rfl
+            | message mm =>
+              simp only at hstep
+              cases hstep
+              exact rel_op_plain hfan hrun hnext hkeys hcorr hhist hapA rfl rfl rfl
+          | deleteStream name =>
+            have hru : r = .unit := deleteStep_ret hst
+            subst hru
+            simp only at hstep
+            cases hstep
+            refine rel_op_fanout (k := .delete name)
+              hfan hrun hnext hkeys hcorr hhist ?_ ?_ ?_ hapA rfl
+            · intro id a hlka htgt
+              obtain ⟨r₀, hlkr⟩ := lookupRt_isSome_of_keys hkeys id a hlka
+              have hreg : a.registered = true := isTargetOf_delete_registered htgt
+              have hae : a = r₀.erase := corr_erase_of_target hcorr hlkr hlka hreg
+              have h3 : (a.stream == name) = true ∧ a.registered = true := by
+                have h' : (a.stream == name && a.registered) = true := htgt
+                simp only [Bool.and_eq_true] at h'
+                exact h'
+              rw [hae] at h3
+              show id ∈ (s.subs.filter (fun p => p.2.registered && p.2.stream == name)).map Prod.fst
+              refine List.mem_map.mpr ⟨(id, r₀),
+                List.mem_filter.mpr ⟨mem_of_lookupRt s.subs id r₀ hlkr, ?_⟩, rfl⟩
+              show (r₀.registered && r₀.stream == name) = true
+              simp only [Bool.and_eq_true]
+              exact ⟨h3.2, h3.1⟩
+            · intro id hid a hlka
+              obtain ⟨q, hq, hq1⟩ := List.mem_map.mp hid
+              obtain ⟨hqmem, hpred⟩ := List.mem_filter.mp hq
+              have hlkr : lookupRt s.subs id = some q.2 := by
+                rw [← hq1]
+                exact lookupRt_of_mem_pairwise s.subs q.1 q.2 hinv.shape.1 hqmem
+              have h3 : q.2.registered = true ∧ (q.2.stream == name) = true := by
+                simp only [Bool.and_eq_true] at hpred
+                exact hpred
+              have hae : a = q.2.erase :=
+                corr_erase_of_target hcorr hlkr hlka (by
+                  obtain ⟨b, hlkb, hcb⟩ := hcorr id q.2 hlkr
+                  rw [hlka] at hlkb
+                  cases hlkb
+                  rw [hcb.2 (not_closed_of_registered (rtSubInv_of_lookup hinv hlkr) h3.1)]
+                  exact h3.1)
+              refine Or.inr ?_
+              show (a.stream == name && a.registered) = true
+              rw [hae]
+              simp only [Bool.and_eq_true]
+              exact ⟨h3.2, h3.1⟩
+            · exact ⟨(fun stream' m' el' hk => by cases hk),
+                (fun name' hk => by cases hk; exact hstA)⟩
+          | createStream raw =>
+            cases r <;>
+              (simp only at hstep
+               cases hstep
+               exact rel_op_plain hfan hrun hnext hkeys hcorr hhist hapA rfl rfl rfl)
+          | getStream nm =>
+            cases r <;>
+              (simp only at hstep
+               cases hstep
+               exact rel_op_plain hfan hrun hnext hkeys hcorr hhist hapA rfl rfl rfl)
+          | lastMessageForSubject st sj =>
+            cases r <;>
+              (simp only at hstep
+               cases hstep
+               exact rel_op_plain hfan hrun hnext hkeys hcorr hhist hapA rfl rfl rfl)
+
+
 end EffectNatsSubstrate
