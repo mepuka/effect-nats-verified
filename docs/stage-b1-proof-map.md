@@ -246,6 +246,23 @@ named lemma (each returning pull either empties `pending` or moves `done` to `sh
 third consecutive pull of one subscriber never returns) before `a4_complete` uses it; an enumeration probe is not acceptance evidence
 (overwatch Q12, disposed 2026-08-23).
 
+### P6 — `RtWitnesses.lean`: non-vacuity witnesses and empty-list guards (owner's request, 2026-08-23)
+
+Every frozen theorem with hypotheses gets a kernel-checked instance where the hypotheses hold and
+the conclusion is not trivial, and every `decide`d trace theorem gets a guard against an empty list.
+Proof-side module, `import EffectNatsSubstrate.RtCommute` (for the frozen `bindStep`) — so after
+P3 merges. Statements elaborated and **decided true** in `research/logs/p6_witnesses.lean`:
+`allSubTraces_count : allSubTraces.length = 9`, `allRtTraces_count : allRtTraces.length = 4`;
+`midFanOut` (the §4.2 run just after its second publish; a fan-out in flight, remaining `[0, 1]`);
+`sb2_witness` (at `midFanOut`, `pull 1` and `check 0` are enabled in either order and the orders
+agree — pairing `pull 1` with `check 1` is the §4.2 non-commutation SB2 excludes by `i ≠ j`, and the
+probe confirmed it does not commute); `sb3_witness` (`midFanOut` has a fan-out in flight and a
+non-empty buffer — SB3/SB7 have something to say); `a4complete_witness` (`abstract42` is a valid
+trace without `unsubscribe`, the `counterexample` run has its serial labels, ends quiescent without
+closes, and both acceptance sets have ≥ 2 histories). Plus, per SB1 law, one concrete queue
+satisfying its hypotheses (cheap; list them in the module). All in `scripts/Axioms.lean`. The B1
+assurance review cites this module for axis "statement non-vacuity".
+
 ## 4. Gate
 
 `bash scripts/gate.sh` (build clean, forbidden sweep, `#print axioms` over `scripts/Axioms.lean`,
