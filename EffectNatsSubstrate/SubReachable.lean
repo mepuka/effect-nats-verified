@@ -25,26 +25,57 @@ theorem mem_of_lookupSub :
     · simp only [lookupSub, if_neg hi] at h
       exact List.mem_cons_of_mem _ (mem_of_lookupSub h)
 
-theorem mem_updateSub :
+theorem mem_updateSub_eq :
     ∀ {subs : List (SubId × Subscriber)} {id : SubId} {f : Subscriber → Subscriber}
       {p : SubId × Subscriber},
-      p ∈ updateSub subs id f → p ∈ subs ∨ ∃ sub, (p.1, sub) ∈ subs ∧ p.2 = f sub
+      p ∈ updateSub subs id f → p ∈ subs ∨ (p.1 = id ∧ ∃ sub, (id, sub) ∈ subs ∧ p.2 = f sub)
   | [], _, _, _, h => by cases h
   | (i, sub) :: rest, id, f, p, h => by
     by_cases hi : i = id
     · subst hi
       simp only [updateSub] at h
       rcases List.mem_cons.mp h with rfl | h
-      · exact Or.inr ⟨sub, List.mem_cons_self, rfl⟩
-      · rcases mem_updateSub h with h1 | ⟨sub', h1, h2⟩
+      · exact Or.inr ⟨rfl, sub, List.mem_cons_self, rfl⟩
+      · rcases mem_updateSub_eq h with h1 | ⟨hp1, sub', h1, h2⟩
         · exact Or.inl (List.mem_cons_of_mem _ h1)
-        · exact Or.inr ⟨sub', List.mem_cons_of_mem _ h1, h2⟩
+        · exact Or.inr ⟨hp1, sub', List.mem_cons_of_mem _ h1, h2⟩
     · simp only [updateSub, if_neg hi] at h
       rcases List.mem_cons.mp h with rfl | h
       · exact Or.inl List.mem_cons_self
-      · rcases mem_updateSub h with h1 | ⟨sub', h1, h2⟩
+      · rcases mem_updateSub_eq h with h1 | ⟨hp1, sub', h1, h2⟩
         · exact Or.inl (List.mem_cons_of_mem _ h1)
-        · exact Or.inr ⟨sub', List.mem_cons_of_mem _ h1, h2⟩
+        · exact Or.inr ⟨hp1, sub', List.mem_cons_of_mem _ h1, h2⟩
+
+theorem mem_updateSub :
+    ∀ {subs : List (SubId × Subscriber)} {id : SubId} {f : Subscriber → Subscriber}
+      {p : SubId × Subscriber},
+      p ∈ updateSub subs id f → p ∈ subs ∨ ∃ sub, (p.1, sub) ∈ subs ∧ p.2 = f sub := by
+  intro subs id f p h
+  rcases mem_updateSub_eq h with h1 | ⟨hp1, sub, h1, h2⟩
+  · exact Or.inl h1
+  · subst hp1
+    exact Or.inr ⟨sub, h1, h2⟩
+
+/-! ## The enabling condition of `register` -/
+
+/-- A successful registration is for the next id with a positive capacity. -/
+theorem applyRegister_enabled {s s' : SubState} {stream : StreamName} {opts : ConsumeOptions}
+    {l₀ : StreamSeq} {id : SubId} {e : Expect}
+    (h : applyRegister s stream opts l₀ id e = some s') :
+    id = s.nextId ∧ opts.buffer.capacity ≠ 0 := by
+  unfold applyRegister at h
+  split at h
+  · cases h
+  · rename_i hguard
+    refine ⟨?_, ?_⟩
+    · by_cases hne : id = s.nextId
+      · exact hne
+      · exfalso
+        apply hguard
+        simp [hne]
+    · intro hz
+      apply hguard
+      simp [hz]
 
 /-! ## `StateInv` preserved by each label -/
 
@@ -72,7 +103,8 @@ theorem afterOp_inv {s : SubState} {core' : JSState} {o : Op} {r : Ret}
           exact lookupStream_updateStream_self _ _ _ _ hl
         · show st.nextSequence
             ≤ (applyPublish st subject payload headers (isRollup headers) now).1.nextSequence
-          simp [applyPublish]
+          rw [applyPublish_nextSequence]
+          exact Nat.le_succ _
       · refine ⟨st₀, ?_, Nat.le_refl _⟩
         show lookupStream core' n = some st₀
         rw [hceq, lookupStream_updateStream_other _ _ _ _ hn]
@@ -83,7 +115,8 @@ theorem afterOp_inv {s : SubState} {core' : JSState} {o : Op} {r : Ret}
         exact lookupStream_updateStream_self _ _ _ _ hl
       · show st.nextSequence
           < (applyPublish st subject payload headers (isRollup headers) now).1.nextSequence
-        simp [applyPublish]
+        rw [applyPublish_nextSequence]
+        exact Nat.lt_succ_self _
   | deleteStream name =>
     have hdel : deleteStep s.core name = .ok (core', r) := hstep
     have hceq := deleteStep_ok_eq hdel
@@ -132,10 +165,11 @@ theorem applyRegister_inv {s s' : SubState} {stream : StreamName} {opts : Consum
     {l₀ : StreamSeq} {id : SubId} {e : Expect}
     (hreach : Reachable s.core) (hinv : StateInv s)
     (h : applyRegister s stream opts l₀ id e = some s') : StateInv s' := by
+  have hcap : opts.buffer.capacity ≠ 0 := (applyRegister_enabled h).2
   unfold applyRegister at h
   split at h
   · cases h
-  · rename_i hguard
+  · rename_i _hguard
     split at h
     · split at h
       · cases h; exact hinv
@@ -149,10 +183,6 @@ theorem applyRegister_inv {s s' : SubState} {stream : StreamName} {opts : Consum
         rcases List.mem_append.mp hp' with hold | hnew
         · exact (hinv p hold).core_eq rfl
         · rw [List.mem_singleton.mp hnew]
-          have hcap : opts.buffer.capacity ≠ 0 := by
-            intro hz
-            apply hguard
-            simp [hz]
           exact newSubscriber_inv hl hcap hbound (reachable_sequences_strict hreach hl).1
       · cases h
     · cases h
@@ -306,27 +336,6 @@ theorem keys_map_snd :
   | p :: rest, g => by
     show p.1 :: (rest.map (fun p => (p.1, g p))).map Prod.fst = p.1 :: rest.map Prod.fst
     rw [keys_map_snd rest g]
-
-/-! ## The enabling condition of `register` -/
-
-/-- A successful registration is for the next id with a positive capacity. -/
-theorem applyRegister_enabled {s s' : SubState} {stream : StreamName} {opts : ConsumeOptions}
-    {l₀ : StreamSeq} {id : SubId} {e : Expect}
-    (h : applyRegister s stream opts l₀ id e = some s') :
-    id = s.nextId ∧ opts.buffer.capacity ≠ 0 := by
-  unfold applyRegister at h
-  split at h
-  · cases h
-  · rename_i hguard
-    refine ⟨?_, ?_⟩
-    · by_cases hne : id = s.nextId
-      · exact hne
-      · exfalso
-        apply hguard
-        simp [hne]
-    · intro hz
-      apply hguard
-      simp [hz]
 
 /-! ## The state shape is preserved and holds on every reachable state -/
 

@@ -55,11 +55,28 @@ theorem lookupStream_removeStream_other :
       · simp [lookupStream, removeStream, hm, hmn]
         exact lookupStream_removeStream_other rest name n hne
 
+theorem lookupStream_removeStream_self :
+    ∀ (s : JSState) (name : StreamName),
+      lookupStream (removeStream s name) name = none
+  | [], _ => rfl
+  | (n, st) :: rest, name => by
+    by_cases hn : n = name
+    · simp only [removeStream, if_pos hn]
+      exact lookupStream_removeStream_self rest name
+    · simp only [removeStream, if_neg hn, lookupStream]
+      exact lookupStream_removeStream_self rest name
+
 theorem lookupStream_insertStream_other (s : JSState) (name n : StreamName) (st : StreamState)
     (hne : name ≠ n) : lookupStream (insertStream s name st) n = lookupStream s n := by
   simp [lookupStream, insertStream, hne]
 
 /-! ## The state shape of each successful operation -/
+
+/-- A committed publish advances the head by exactly one. -/
+theorem applyPublish_nextSequence (st : StreamState) (subject : SubjectName)
+    (payload : PayloadHash) (headers : List (String × String)) (rollup : Bool) (now : Nat) :
+    (applyPublish st subject payload headers rollup now).1.nextSequence = st.nextSequence + 1 :=
+  rfl
 
 theorem publishStep_ok_eq {s s' : JSState} {r : Ret} {stream : StreamName}
     {subject : SubjectName} {payload : PayloadHash} {headers : List (String × String)}
@@ -111,6 +128,38 @@ theorem createStep_lookup_preserved {s s' : JSState} {r : Ret} {raw : RawStreamC
       by_cases hn : config.name = n
       · subst hn; rw [hl] at habsent; cases habsent
       · rw [lookupStream_insertStream_other _ _ _ _ hn]; exact hl
+
+theorem createStep_ok_shape {s s' : JSState} {raw : RawStreamConfig} {r : Ret}
+    (h : createStep s raw = .ok (s', r)) :
+    s' = s ∨ ∃ config, validate raw = .ok config ∧ lookupStream s config.name = none ∧
+      s' = insertStream s config.name { config := config, messages := [], nextSequence := 1 } := by
+  unfold createStep at h
+  split at h
+  · cases h
+  · rename_i config hval
+    split at h
+    · split at h
+      · cases h; exact Or.inl rfl
+      · cases h
+    · rename_i hlook
+      cases h
+      exact Or.inr ⟨config, hval, hlook, rfl⟩
+
+theorem getStep_ok_eq {s s' : JSState} {name : StreamName} {r : Ret}
+    (h : getStep s name = .ok (s', r)) : s' = s := by
+  unfold getStep at h
+  split at h
+  · cases h; rfl
+  · cases h
+
+theorem lastMsgStep_ok_eq {s s' : JSState} {stream : StreamName} {subject : SubjectName} {r : Ret}
+    (h : lastMsgStep s stream subject = .ok (s', r)) : s' = s := by
+  unfold lastMsgStep at h
+  split at h
+  · cases h
+  · split at h
+    · cases h; rfl
+    · cases h
 
 /-- The successful non-publish, non-delete operations keep every lookup that
 existed; `step` on them is `createStep`, `getStep`, or `lastMsgStep`. -/
@@ -168,6 +217,30 @@ theorem mem_entrySequences {obs : List Observed} {n : StreamSeq} :
     | failed e => simp at hn
   · rintro ⟨m, hm, hn⟩
     exact ⟨.entry m, hm, by simp [hn]⟩
+
+/-! ## Equations for `visible` across an admitted message or a drain -/
+
+theorem entrySequences_visible_admit (sub : Subscriber) (m : StoredMessage) :
+    entrySequences (visible { sub with pending := sub.pending ++ [m], lastEnqueued := m.sequence })
+      = entrySequences (visible sub) ++ [m.sequence] := by
+  simp [visible, entrySequences_append, entrySequences_map_entry, entrySequences_entry_singleton,
+    List.map_append]
+
+theorem visible_admit (sub : Subscriber) (m : StoredMessage) :
+    visible { sub with pending := sub.pending ++ [m], lastEnqueued := m.sequence }
+      = visible sub ++ [Observed.entry m] := by
+  simp [visible, List.map_append, List.append_assoc]
+
+theorem visible_drain (sub : Subscriber) :
+    visible { sub with observed := sub.observed ++ sub.pending.map Observed.entry, pending := [] }
+      = visible sub := by
+  simp [visible]
+
+theorem visible_drain_done (sub : Subscriber) (e : SubError) :
+    visible { sub with observed := sub.observed ++ sub.pending.map Observed.entry, pending := [],
+                       status := QueueStatus.done e }
+      = visible sub := by
+  simp [visible]
 
 theorem pairwise_lt_append_singleton {l : List Nat} {x : Nat}
     (h : l.Pairwise (· < ·)) (hx : ∀ y ∈ l, y < x) : (l ++ [x]).Pairwise (· < ·) := by

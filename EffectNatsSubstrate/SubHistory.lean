@@ -168,71 +168,6 @@ theorem liveOf_at_length (committed : List (StreamName × StoredMessage)) (sub :
   rw [List.drop_length]
   rfl
 
-/-! ## Core shapes the ledger needs -/
-
-theorem lookupStream_removeStream_self : ∀ (s : JSState) (name : StreamName),
-    lookupStream (removeStream s name) name = none
-  | [], _ => rfl
-  | (n, st) :: rest, name => by
-    by_cases hn : n = name
-    · simp only [removeStream, if_pos hn]
-      exact lookupStream_removeStream_self rest name
-    · simp only [removeStream, if_neg hn, lookupStream]
-      exact lookupStream_removeStream_self rest name
-
-theorem createStep_ok_shape {s s' : JSState} {raw : RawStreamConfig} {r : Ret}
-    (h : createStep s raw = .ok (s', r)) :
-    s' = s ∨ ∃ config, validate raw = .ok config ∧ lookupStream s config.name = none ∧
-      s' = insertStream s config.name { config := config, messages := [], nextSequence := 1 } := by
-  unfold createStep at h
-  split at h
-  · cases h
-  · rename_i config hval
-    split at h
-    · split at h
-      · cases h; exact Or.inl rfl
-      · cases h
-    · rename_i hlook
-      cases h
-      exact Or.inr ⟨config, hval, hlook, rfl⟩
-
-theorem getStep_ok_eq {s s' : JSState} {name : StreamName} {r : Ret}
-    (h : getStep s name = .ok (s', r)) : s' = s := by
-  unfold getStep at h
-  split at h
-  · cases h; rfl
-  · cases h
-
-theorem lastMsgStep_ok_eq {s s' : JSState} {stream : StreamName} {subject : SubjectName} {r : Ret}
-    (h : lastMsgStep s stream subject = .ok (s', r)) : s' = s := by
-  unfold lastMsgStep at h
-  split at h
-  · cases h
-  · split at h
-    · cases h; rfl
-    · cases h
-
-theorem mem_updateSub_eq :
-    ∀ {subs : List (SubId × Subscriber)} {id : SubId} {f : Subscriber → Subscriber}
-      {p : SubId × Subscriber},
-      p ∈ updateSub subs id f → p ∈ subs ∨ (p.1 = id ∧ ∃ sub, (id, sub) ∈ subs ∧ p.2 = f sub)
-  | [], _, _, _, h => by cases h
-  | (i, sub) :: rest, id, f, p, h => by
-    by_cases hi : i = id
-    · subst hi
-      simp only [updateSub] at h
-      rcases List.mem_cons.mp h with rfl | h
-      · exact Or.inr ⟨rfl, sub, List.mem_cons_self, rfl⟩
-      · rcases mem_updateSub_eq h with h1 | ⟨hp1, sub', h1, h2⟩
-        · exact Or.inl (List.mem_cons_of_mem _ h1)
-        · exact Or.inr ⟨hp1, sub', List.mem_cons_of_mem _ h1, h2⟩
-    · simp only [updateSub, if_neg hi] at h
-      rcases List.mem_cons.mp h with rfl | h
-      · exact Or.inl List.mem_cons_self
-      · rcases mem_updateSub_eq h with h1 | ⟨hp1, sub', h1, h2⟩
-        · exact Or.inl (List.mem_cons_of_mem _ h1)
-        · exact Or.inr ⟨hp1, sub', List.mem_cons_of_mem _ h1, h2⟩
-
 /-! ## The ledger invariant -/
 
 /-- Every stored message is in the ledger; every ledger record is for an assigned id;
@@ -369,22 +304,6 @@ theorem liveOf_admit (committed : List (StreamName × StoredMessage)) (sub : Sub
     (m : StoredMessage) (r : RegInfo) :
     liveOf committed { sub with pending := sub.pending ++ [m], lastEnqueued := m.sequence } r
       = liveOf committed sub r := rfl
-
-theorem visible_admit (sub : Subscriber) (m : StoredMessage) :
-    visible { sub with pending := sub.pending ++ [m], lastEnqueued := m.sequence }
-      = visible sub ++ [Observed.entry m] := by
-  simp [visible, List.map_append, List.append_assoc]
-
-theorem visible_drain (sub : Subscriber) :
-    visible { sub with observed := sub.observed ++ sub.pending.map Observed.entry, pending := [] }
-      = visible sub := by
-  simp [visible]
-
-theorem visible_drain_done (sub : Subscriber) (e : SubError) :
-    visible { sub with observed := sub.observed ++ sub.pending.map Observed.entry, pending := [],
-                       status := QueueStatus.done e }
-      = visible sub := by
-  simp [visible]
 
 theorem histInv_publish {sH : SubStateH} {stream : StreamName} {subject : SubjectName}
     {payload : PayloadHash} {headers : List (String × String)} {x : Option StreamSeq} {now : Nat}
