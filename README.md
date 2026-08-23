@@ -120,6 +120,7 @@ EffectNatsSubstrate/
   RtTraces.lean      the stage-B1 scenarios, checked by decide
   Sim.lean           the stage-B1 statements: A4Inclusion, A4Complete
   EffectQueueLaws.lean the queue laws Q1–Q3 as theorems (SB1)
+  SimRelation.lean   the relation behind a4_inclusion: linearization points, corrSub, Rel, RelHist
 Main.lean            the fixture exporter
 ```
 

@@ -40,7 +40,8 @@ still owes — and paying it at the end of the fan-out.
 | `EffectQueueLaws.lean` | the nine SB1 theorems (proved 2026-08-23, P1) | queue laws |
 | `RtReachable.lean` (to write) | per-label `RtInv` preservation, `rtInv_reachable`, `core_frame`, `core_reachable`, `pending_le_capacity_rt` | SB3, SB6, SB7 |
 | `RtCommute.lean` (to write) | `bindStep`, `commute_consumer_publisher`, `commute_consumers` | SB2 |
-| `SimProof.lean` (to write) | the abstract independence lemmas, the relation, its preservation, `a4_inclusion`, `a4_complete` | SB4, SB5 |
+| `SimRelation.lean` | `pointPassed`, `owedOp`, `corrSub`, `corrOn`, `OwedOk`, `Rel`, `RelHist` — the relation as definitions (proof-side; reshapeable) | the target of P4b |
+| `SimProof.lean` (to write) | the abstract independence lemmas, the relation's preservation, `a4_inclusion`, `a4_complete` | SB4, SB5 |
 
 Dependency order: `EffectQueue → Runtime → RtInvariants → RtTraces → Sim → EffectQueueLaws →
 RtReachable → RtCommute → SimProof`; all imported by the root. Every proof module is added to
@@ -211,8 +212,9 @@ are the "per-subscriber independence" assumption of the stage-A slice document �
 (S) `a4_inclusion : A4Inclusion`. (M) `import EffectNatsSubstrate.RtCommute`,
 `EffectNatsSubstrate.Sim`, `EffectNatsSubstrate.SubHistory` (if `pendingLast` is needed for a
 pre-offer `lastEnqueued`; the relation as designed avoids it by keeping the pre-publish abstract
-state rather than undoing offers). (E) §2.4: define `corr`, `Rel`, prove `rel_initial`, one
-`rel_step_<label>` per label (the mapping table says which abstract labels to append to `labels`
+state rather than undoing offers). (E) §2.4; the relation is already defined in `SimRelation.lean` (`Rel`, `RelHist`, `corrSub`,
+`pointPassed`, `owedOp`) — reshape it only if a preservation step proves it too strong or too weak,
+and say so in the Lane log. Prove `rel_initial`, one `rel_step_<label>` per label (the mapping table says which abstract labels to append to `labels`
 or to `owed`), `rel_endFanOut` (the IOU is paid: apply the owed publish and the suffix; the
 abstract decisions agree with the runtime's — use `corr` for the visited subscribers at their
 check time, carried as a clause of `Rel`), then `a4_inclusion` by induction on `rls` and
