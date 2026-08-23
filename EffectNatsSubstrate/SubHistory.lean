@@ -217,6 +217,20 @@ theorem histInv_create {sH : SubStateH} {raw : RawStreamConfig} {core' : JSState
     · rw [lookupStream_insertStream_other _ _ _ _ (Ne.symm hn)] at hl
       exact hinv.coreCommitted stream st hl m hm
 
+/-- Read-only operations (`getStream`, `lastMessageForSubject`) preserve the history record:
+same core messages, same subscribers, same registers. -/
+theorem histInv_readonly {sH : SubStateH} {o : Op} {core' : JSState} {r : Ret}
+    (hinv : HistInv sH) (hsame : core' = sH.base.core)
+    (hafter : afterOp deliverOne sH.base core' o r = { sH.base with core := core' })
+    (hc : committedAfter sH (.op o (.ok r)) = sH.committed)
+    (hr : regsAfter sH (.op o (.ok r)) = sH.regs) :
+    HistInv { base := afterOp deliverOne sH.base core' o r,
+              committed := committedAfter sH (.op o (.ok r)),
+              regs := regsAfter sH (.op o (.ok r)) } := by
+  subst hsame
+  rw [hafter, hc, hr]
+  exact histInv_of_same hinv hinv.coreCommitted rfl rfl
+
 theorem histInv_get {sH : SubStateH} {name : StreamName} {core' : JSState} {r : Ret}
     (hinv : HistInv sH) (hstep : step sH.base.core (.getStream name) = .ok (core', r)) :
     HistInv { base := afterOp deliverOne sH.base core' (.getStream name) r,
@@ -224,9 +238,7 @@ theorem histInv_get {sH : SubStateH} {name : StreamName} {core' : JSState} {r : 
               regs := regsAfter sH (.op (.getStream name) (.ok r)) } := by
   have hg : getStep sH.base.core name = .ok (core', r) := hstep
   obtain rfl := getStep_ok_eq hg
-  show HistInv { base := { sH.base with core := sH.base.core }, committed := sH.committed,
-                 regs := sH.regs }
-  exact histInv_of_same hinv hinv.coreCommitted rfl rfl
+  exact histInv_readonly hinv rfl rfl rfl rfl
 
 theorem histInv_last {sH : SubStateH} {stream : StreamName} {subject : SubjectName}
     {core' : JSState} {r : Ret}
@@ -237,9 +249,7 @@ theorem histInv_last {sH : SubStateH} {stream : StreamName} {subject : SubjectNa
               regs := regsAfter sH (.op (.lastMessageForSubject stream subject) (.ok r)) } := by
   have hg : lastMsgStep sH.base.core stream subject = .ok (core', r) := hstep
   obtain rfl := lastMsgStep_ok_eq hg
-  show HistInv { base := { sH.base with core := sH.base.core }, committed := sH.committed,
-                 regs := sH.regs }
-  exact histInv_of_same hinv hinv.coreCommitted rfl rfl
+  exact histInv_readonly hinv rfl rfl rfl rfl
 
 theorem histInv_delete {sH : SubStateH} {name : StreamName} {core' : JSState} {r : Ret}
     (hinv : HistInv sH) (hstep : step sH.base.core (.deleteStream name) = .ok (core', r)) :
@@ -273,8 +283,7 @@ theorem histInv_delete {sH : SubStateH} {name : StreamName} {core' : JSState} {r
       | true =>
         exfalso
         have hfalse : (endOne name q.2).registered = false := by
-          unfold endOne
-          rw [if_pos hc]
+          rw [endOne_end hc]
         rw [hfalse] at hreg
         cases hreg
       | false =>
@@ -284,21 +293,16 @@ theorem histInv_delete {sH : SubStateH} {name : StreamName} {core' : JSState} {r
       cases hc : (q.2.stream == name && q.2.registered) with
       | true =>
         have hv : visible (endOne name q.2) = visible q.2 := by
-          unfold endOne
-          rw [if_pos hc]
-          rfl
+          rw [endOne_end hc]
+          simp [visible]
         have hs : (endOne name q.2).stream = q.2.stream := by
-          unfold endOne
-          rw [if_pos hc]
+          rw [endOne_end hc]
         rw [hv] at hm
         rw [hs]
         exact hent m hm
       | false =>
         rw [endOne_skip hc] at hm ⊢
         exact hent m hm
-
-theorem liveKeep_admit (sub : Subscriber) (m : StoredMessage) :
-    liveKeep { sub with pending := sub.pending ++ [m], lastEnqueued := m.sequence } = liveKeep sub := rfl
 
 theorem liveOf_admit (committed : List (StreamName × StoredMessage)) (sub : Subscriber)
     (m : StoredMessage) (r : RegInfo) :
@@ -323,14 +327,9 @@ theorem histInv_publish {sH : SubStateH} {stream : StreamName} {subject : Subjec
     · subst hn
       rw [lookupStream_updateStream_self _ _ _ _ hl] at hl'
       cases hl'
-      simp only [applyPublish] at hm
-      have hsub := (pruneSubject_sublist
-        (publishBase st subject (isRollup headers) ++ [newMessage st subject payload headers now])
-        subject st.config.maxMessagesPerSubject).subset hm
-      rcases List.mem_append.mp hsub with hold | hnew
-      · exact List.mem_append.mpr
-          (Or.inl (hinv.coreCommitted stream' st hl m ((publishBase_sublist st subject _).subset hold)))
-      · rw [List.mem_singleton.mp hnew]
+      rcases mem_applyPublish hm with hold | hnew
+      · exact List.mem_append.mpr (Or.inl (hinv.coreCommitted stream' st hl m hold))
+      · rw [hnew]
         exact List.mem_append.mpr (Or.inr (List.mem_singleton.mpr rfl))
     · rw [lookupStream_updateStream_other _ _ _ _ hn] at hl'
       exact List.mem_append.mpr (Or.inl (hinv.coreCommitted stream' st' hl' m hm))
@@ -423,19 +422,9 @@ theorem histInv_op {sH : SubStateH} {o : Op} {e : Expect} {base' : SubState}
     | lastMessageForSubject stream subject => exact histInv_last hinv hstep
   | error err =>
     have h' : applyOp deliverOne sH.base o (.error err) = some base' := hx
-    unfold applyOp at h'
-    cases hstep : step sH.base.core o with
-    | ok p =>
-      obtain ⟨core', r₀⟩ := p
-      rw [hstep] at h'
-      simp at h'
-    | error err₀ =>
-      rw [hstep] at h'
-      simp only at h'
-      split at h'
-      · cases h'
-        cases o <;> exact hinv
-      · cases h'
+    obtain ⟨heq, -⟩ := applyOp_error_eq h'
+    subst heq
+    cases o <;> exact hinv
 
 theorem histInv_register {sH : SubStateH} {stream : StreamName} {opts : ConsumeOptions}
     {l₀ : StreamSeq} {id : SubId} {e : Expect} {base' : SubState} (hinv : HistInv sH)
@@ -520,102 +509,75 @@ theorem histInv_pull {sH : SubStateH} {id : SubId} {base' : SubState} (hsinv : S
     (hinv : HistInv sH) (hx : apply sH.base (.pull id) = some base') :
     HistInv { base := base', committed := committedAfter sH (.pull id),
               regs := regsAfter sH (.pull id) } := by
-  have h' : applyPull pullStep sH.base id = some base' := hx
-  unfold applyPull at h'
-  split at h'
-  · cases h'
-  · rename_i sub hsub
-    split at h'
-    · cases h'
-    · rename_i sub' hpull
-      cases h'
-      refine ⟨hinv.coreCommitted, hinv.regsBelow, ?_⟩
-      intro p hp
-      have hp' : p ∈ updateSub sH.base.subs id (fun _ => sub') := hp
-      rcases mem_updateSub_eq hp' with hold | ⟨hpid, _, _, hp2⟩
-      · exact hinv.subs p hold
-      · obtain ⟨r, hr, hat, heq, hent⟩ := hinv.subs (id, sub) (mem_of_lookupSub hsub)
-        have hsubinv : SubInv sH.base sub := hsinv (id, sub) (mem_of_lookupSub hsub)
-        rw [hpid, hp2]
-        refine ⟨r, hr, hat, ?_, ?_⟩
-        · intro hreg
-          unfold pullStep at hpull
-          split at hpull
-          · cases hpull
-          · rename_i e hst
-            cases hpull
-            have hreg' : sub.registered = true := hreg
-            have ho := hsubinv.registeredOpen hreg'
-            rw [hst] at ho
-            cases ho
-          · split at hpull
-            · cases hpull
-            · cases hpull
-              have hreg' : sub.registered = true := hreg
-              rw [visible_drain]
-              exact heq hreg'
-          · rename_i e hst
-            split at hpull
-            · cases hpull
-            · cases hpull
-              have hreg' : sub.registered = true := hreg
-              have ho := hsubinv.registeredOpen hreg'
-              rw [hst] at ho
-              cases ho
-        · intro m hm
-          unfold pullStep at hpull
-          split at hpull
-          · cases hpull
-          · rename_i e hst
-            cases hpull
-            have hm' : Observed.entry m ∈ (sub.observed ++ [Observed.failed e]) ++
-                sub.pending.map Observed.entry := hm
-            rcases List.mem_append.mp hm' with hobs | hpend
-            · rcases List.mem_append.mp hobs with hobs' | hf
-              · exact hent m (List.mem_append.mpr (Or.inl hobs'))
-              · rw [List.mem_singleton] at hf
-                cases hf
-            · exact hent m (List.mem_append.mpr (Or.inr hpend))
-          · split at hpull
-            · cases hpull
-            · cases hpull
-              rw [visible_drain] at hm
-              exact hent m hm
-          · rename_i e hst
-            split at hpull
-            · cases hpull
-            · cases hpull
-              rw [visible_drain_done] at hm
-              exact hent m hm
+  obtain ⟨sub, sub', hsub, hpull, heq⟩ :=
+    applyPull_ok_eq (s' := base') (show applyPull pullStep sH.base id = some base' from hx)
+  subst heq
+  refine ⟨hinv.coreCommitted, hinv.regsBelow, ?_⟩
+  intro p hp
+  have hp' : p ∈ updateSub sH.base.subs id (fun _ => sub') := hp
+  rcases mem_updateSub_eq hp' with hold | ⟨hpid, _, _, hp2⟩
+  · exact hinv.subs p hold
+  · obtain ⟨r, hr, hat, heq, hent⟩ := hinv.subs (id, sub) (mem_of_lookupSub hsub)
+    have hsubinv : SubInv sH.base sub := hsinv (id, sub) (mem_of_lookupSub hsub)
+    rw [hpid, hp2]
+    refine ⟨r, hr, hat, ?_, ?_⟩
+    · intro hreg
+      rcases pullStep_ok_eq hpull with ⟨e, hps, hpeq⟩ | ⟨_, _, hpeq⟩ | ⟨e, hps, _, hpeq⟩
+      · subst hpeq
+        have hreg' : sub.registered = true := hreg
+        have ho := hsubinv.registeredOpen hreg'
+        rw [hps] at ho
+        cases ho
+      · subst hpeq
+        have hreg' : sub.registered = true := hreg
+        rw [visible_drain]
+        exact heq hreg'
+      · subst hpeq
+        have hreg' : sub.registered = true := hreg
+        have ho := hsubinv.registeredOpen hreg'
+        rw [hps] at ho
+        cases ho
+    · intro m hm
+      rcases pullStep_ok_eq hpull with ⟨e, hps, hpeq⟩ | ⟨_, _, hpeq⟩ | ⟨e, hps, _, hpeq⟩
+      · subst hpeq
+        have hm' : Observed.entry m ∈ (sub.observed ++ [Observed.failed e]) ++
+            sub.pending.map Observed.entry := hm
+        rcases List.mem_append.mp hm' with hobs | hpend
+        · rcases List.mem_append.mp hobs with hobs' | hf
+          · exact hent m (List.mem_append.mpr (Or.inl hobs'))
+          · rw [List.mem_singleton] at hf
+            cases hf
+        · exact hent m (List.mem_append.mpr (Or.inr hpend))
+      · subst hpeq
+        rw [visible_drain] at hm
+        exact hent m hm
+      · subst hpeq
+        rw [visible_drain_done] at hm
+        exact hent m hm
 
 theorem histInv_unsubscribe {sH : SubStateH} {id : SubId} {base' : SubState}
     (hinv : HistInv sH) (hx : apply sH.base (.unsubscribe id) = some base') :
     HistInv { base := base', committed := committedAfter sH (.unsubscribe id),
               regs := regsAfter sH (.unsubscribe id) } := by
-  have h' : applyUnsubscribe sH.base id = some base' := hx
-  unfold applyUnsubscribe at h'
-  split at h'
-  · cases h'
-  · rename_i sub hsub
-    split at h'
-    · cases h'
-    · cases h'
-      refine ⟨hinv.coreCommitted, hinv.regsBelow, ?_⟩
-      intro p hp
-      have hp' : p ∈ updateSub sH.base.subs id
-          (fun sub => { sub with registered := false, pending := [], status := .shutDown }) := hp
-      rcases mem_updateSub_eq hp' with hold | ⟨hpid, sub₀, h₀, hp2⟩
-      · exact hinv.subs p hold
-      · obtain ⟨r, hr, hat, _, hent⟩ := hinv.subs (id, sub₀) h₀
-        rw [hpid, hp2]
-        refine ⟨r, hr, hat, ?_, ?_⟩
-        · intro hreg
-          cases hreg
-        · intro m hm
-          have hm' : Observed.entry m ∈ sub₀.observed ++ ([] : List StoredMessage).map Observed.entry :=
-            hm
-          simp only [List.map_nil, List.append_nil] at hm'
-          exact hent m (List.mem_append.mpr (Or.inl hm'))
+  obtain ⟨sub, hsub, _, heq⟩ :=
+    applyUnsubscribe_ok_eq (s' := base') (show applyUnsubscribe sH.base id = some base' from hx)
+  subst heq
+  refine ⟨hinv.coreCommitted, hinv.regsBelow, ?_⟩
+  intro p hp
+  have hp' : p ∈ updateSub sH.base.subs id
+      (fun sub => { sub with registered := false, pending := [], status := .shutDown }) := hp
+  rcases mem_updateSub_eq hp' with hold | ⟨hpid, sub₀, h₀, hp2⟩
+  · exact hinv.subs p hold
+  · obtain ⟨r, hr, hat, _, hent⟩ := hinv.subs (id, sub₀) h₀
+    rw [hpid, hp2]
+    refine ⟨r, hr, hat, ?_, ?_⟩
+    · intro hreg
+      cases hreg
+    · intro m hm
+      have hm' : Observed.entry m ∈ sub₀.observed ++ ([] : List StoredMessage).map Observed.entry :=
+        hm
+      simp only [List.map_nil, List.append_nil] at hm'
+      exact hent m (List.mem_append.mpr (Or.inl hm'))
 
 theorem histInv_step {sH sH' : SubStateH} {l : Label} (hreach : ReachableSubH sH)
     (hinv : HistInv sH) (h : applyH sH l = some sH') : HistInv sH' := by

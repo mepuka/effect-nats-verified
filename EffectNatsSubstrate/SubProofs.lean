@@ -21,59 +21,159 @@ theorem afterOp_core (s : SubState) (core' : JSState) (o : Op) (r : Ret) :
   unfold afterOp
   split <;> rfl
 
+/-- A successful operation with an `.ok` expectation: the exact core step and the
+`afterOp` continuation. -/
+theorem applyOp_ok_eq {s s' : SubState} {o : Op} {r : Ret}
+    (h : applyOp deliver s o (.ok r) = some s') :
+    ∃ core', step s.core o = .ok (core', r) ∧ s' = afterOp deliver s core' o r := by
+  unfold applyOp at h
+  cases hstep : step s.core o with
+  | error err =>
+    rw [hstep] at h
+    simp at h
+  | ok p =>
+    obtain ⟨core', r₀⟩ := p
+    rw [hstep] at h
+    simp only at h
+    split at h
+    · rename_i hrr
+      cases h
+      subst hrr
+      exact ⟨core', rfl, rfl⟩
+    · cases h
+
+/-- A failed operation with an `.error` expectation: the state is returned unchanged and
+the core step failed with exactly the expected error. -/
+theorem applyOp_error_eq {s s' : SubState} {o : Op} {err : JSError}
+    (h : applyOp deliver s o (.error err) = some s') :
+    s' = s ∧ step s.core o = .error err := by
+  unfold applyOp at h
+  cases hstep : step s.core o with
+  | ok p =>
+    rw [hstep] at h
+    simp at h
+  | error err' =>
+    rw [hstep] at h
+    simp only at h
+    split at h
+    · rename_i hguard
+      cases h
+      refine ⟨rfl, ?_⟩
+      exact congrArg _ hguard
+    · cases h
+
 theorem applyOp_core {s s' : SubState} {o : Op} {e : Expect}
     (h : applyOp deliver s o e = some s') :
     s'.core = s.core ∨ ∃ r, step s.core o = .ok (s'.core, r) := by
-  unfold applyOp at h
+  rcases e with r | err
+  · obtain ⟨core', hstep, hs'⟩ := applyOp_ok_eq h
+    refine Or.inr ⟨r, ?_⟩
+    rw [hs', afterOp_core]
+    exact hstep
+  · obtain ⟨hs', hstep⟩ := applyOp_error_eq h
+    exact Or.inl (by rw [hs'])
+
+theorem applyPull_ok_eq {s s' : SubState} {id : SubId}
+    (h : applyPull pull s id = some s') :
+    ∃ sub sub', lookupSub s.subs id = some sub ∧ pull sub = some sub' ∧
+      s' = { s with subs := updateSub s.subs id (fun _ => sub') } := by
+  unfold applyPull at h
   split at h
-  · rename_i core' r r' hstep
-    split at h
-    · cases h
-      right
-      refine ⟨r, ?_⟩
-      rw [afterOp_core]
-      exact hstep
-    · cases h
-  · rename_i err err' hstep
-    split at h
-    · cases h
-      left
-      rfl
-    · cases h
   · cases h
+  · rename_i sub hsub
+    split at h
+    · cases h
+    · rename_i sub' hpull
+      cases h
+      exact ⟨sub, sub', hsub, hpull, rfl⟩
+
+/-- Unsubscribe hits an existing subscriber that was not already shut down. -/
+theorem applyUnsubscribe_ok_eq {s s' : SubState} {id : SubId}
+    (h : applyUnsubscribe s id = some s') :
+    ∃ sub, lookupSub s.subs id = some sub ∧ sub.status ≠ .shutDown ∧
+      s' = { s with
+             subs := updateSub s.subs id
+               (fun sub => { sub with registered := false, pending := [], status := .shutDown }) } := by
+  unfold applyUnsubscribe at h
+  split at h
+  · cases h
+  · rename_i sub hsub
+    split at h
+    · cases h
+    · rename_i hne
+      cases h
+      exact ⟨sub, hsub, fun heq => hne heq, rfl⟩
+
+/-- The two successful registration shapes: the missing-stream report leaves the state
+unchanged; a real registration appends the fresh subscriber and bumps `nextId`. -/
+theorem applyRegister_ok_eq {s s' : SubState} {stream : StreamName} {opts : ConsumeOptions}
+    {l₀ : StreamSeq} {id : SubId} {e : Expect}
+    (h : applyRegister s stream opts l₀ id e = some s') :
+    (lookupStream s.core stream = none ∧ e = .error (.streamNotFound stream) ∧ s' = s)
+    ∨ (∃ st, lookupStream s.core stream = some st ∧ e = .ok .unit ∧
+        replayBound st.messages opts l₀ st.nextSequence = true ∧
+        s' = { s with
+               subs := s.subs ++ [(id, newSubscriber stream opts l₀ st.messages)],
+               nextId := id + 1 }) := by
+  unfold applyRegister at h
+  split at h
+  · cases h
+  · rename_i _hguard
+    cases hl : lookupStream s.core stream with
+    | none =>
+      rw [hl] at h
+      cases e with
+      | ok r => simp at h
+      | error err =>
+        cases err with
+        | streamNotFound n =>
+          by_cases hns : n = stream
+          · have h' : (if n = stream then some s else none) = some s' := h
+            rw [if_pos hns] at h'
+            cases h'
+            refine Or.inl ⟨rfl, ?_, rfl⟩
+            rw [← hns]
+          · have h' : (if n = stream then some s else none) = some s' := h
+            rw [if_neg hns] at h'
+            cases h'
+        | _ => simp at h
+    | some st =>
+      rw [hl] at h
+      cases e with
+      | error err => simp at h
+      | ok r =>
+        cases r with
+        | config c => simp at h
+        | sequence n => simp at h
+        | message m => simp at h
+        | unit =>
+          have h' : (if replayBound st.messages opts l₀ st.nextSequence then some
+              { s with subs := s.subs ++ [(id, newSubscriber stream opts l₀ st.messages)],
+                       nextId := id + 1 }
+              else none) = some s' := h
+          by_cases hb : replayBound st.messages opts l₀ st.nextSequence = true
+          · rw [if_pos hb] at h'
+            cases h'
+            exact Or.inr ⟨st, rfl, rfl, hb, rfl⟩
+          · rw [if_neg hb] at h'
+            cases h'
 
 theorem applyRegister_core {s s' : SubState} {stream : StreamName} {opts : ConsumeOptions}
     {l₀ : StreamSeq} {id : SubId} {e : Expect}
     (h : applyRegister s stream opts l₀ id e = some s') : s'.core = s.core := by
-  unfold applyRegister at h
-  split at h
-  · cases h
-  · split at h
-    · split at h
-      · cases h; rfl
-      · cases h
-    · split at h
-      · cases h; rfl
-      · cases h
-    · cases h
+  rcases applyRegister_ok_eq h with ⟨_, _, heq⟩ | ⟨_, _, _, _, heq⟩
+  · rw [heq]
+  · rw [heq]
 
 theorem applyPull_core {s s' : SubState} {id : SubId}
     (h : applyPull pull s id = some s') : s'.core = s.core := by
-  unfold applyPull at h
-  split at h
-  · cases h
-  · split at h
-    · cases h
-    · cases h; rfl
+  obtain ⟨_, _, _, _, heq⟩ := applyPull_ok_eq h
+  rw [heq]
 
 theorem applyUnsubscribe_core {s s' : SubState} {id : SubId}
     (h : applyUnsubscribe s id = some s') : s'.core = s.core := by
-  unfold applyUnsubscribe at h
-  split at h
-  · cases h
-  · split at h
-    · cases h
-    · cases h; rfl
+  obtain ⟨_, _, _, heq⟩ := applyUnsubscribe_ok_eq h
+  rw [heq]
 
 theorem apply_core {s s' : SubState} {l : Label} (h : apply s l = some s') :
     s'.core = s.core ∨ ∃ o r, step s.core o = .ok (s'.core, r) := by
@@ -123,13 +223,6 @@ theorem selectReplay_pairwise {messages : List StoredMessage} {opts : ConsumeOpt
     (selectReplay messages opts).Pairwise (fun a b => a.sequence < b.sequence) :=
   List.Pairwise.sublist (selectReplay_sublist messages opts) h
 
-theorem entrySequences_visible_newSubscriber (stream : StreamName) (opts : ConsumeOptions)
-    (l₀ : StreamSeq) (messages : List StoredMessage) :
-    entrySequences (visible (newSubscriber stream opts l₀ messages))
-      = (selectReplay messages opts).map (·.sequence) := by
-  simp [visible, newSubscriber, replayObserved, entrySequences_append, entrySequences_map_entry,
-    entrySequences_caughtUp]
-
 /-! ## Preservation of `SubInv` under `register`, `pull`, `unsubscribe` -/
 
 theorem newSubscriber_inv {s : SubState} {stream : StreamName} {opts : ConsumeOptions}
@@ -138,9 +231,7 @@ theorem newSubscriber_inv {s : SubState} {stream : StreamName} {opts : ConsumeOp
     (hbound : replayBound st.messages opts l₀ st.nextSequence = true)
     (hstrict : st.messages.Pairwise (fun a b => a.sequence < b.sequence)) :
     SubInv s (newSubscriber stream opts l₀ st.messages) := by
-  have hrb := hbound
-  simp only [replayBound, Bool.and_eq_true, List.all_eq_true, decide_eq_true_eq] at hrb
-  obtain ⟨hall, hlt⟩ := hrb
+  obtain ⟨hall, hlt⟩ := replayBound_eq_true_iff.mp hbound
   constructor
   · exact Nat.pos_of_ne_zero hcap
   · exact Nat.zero_le _
@@ -164,76 +255,66 @@ theorem registered_false_of_status {s : SubState} {sub : Subscriber} (hinv : Sub
   | false => rfl
   | true => exact absurd (hinv.registeredOpen hr) hne
 
-theorem pullStep_inv {s : SubState} {sub sub' : Subscriber} (hinv : SubInv s sub)
-    (h : pullStep sub = some sub') : SubInv s sub' := by
+/-- The four arms of a successful pull: failure-after-done, an opened drain, or a
+closing drain that finishes. -/
+theorem pullStep_ok_eq {sub sub' : Subscriber} (h : pullStep sub = some sub') :
+    (∃ e, sub.status = .done e ∧
+        sub' = { sub with observed := sub.observed ++ [.failed e], status := .shutDown })
+    ∨ (sub.status = .opened ∧ sub.pending ≠ [] ∧
+        sub' = { sub with observed := sub.observed ++ sub.pending.map Observed.entry,
+                          pending := [] })
+    ∨ (∃ e, sub.status = .closing e ∧ sub.pending ≠ [] ∧
+        sub' = { sub with observed := sub.observed ++ sub.pending.map Observed.entry,
+                          pending := [], status := .done e }) := by
   unfold pullStep at h
   split at h
   · cases h
   · rename_i e hst
     cases h
-    have hpend : sub.pending = [] := hinv.doneEmpty e hst
-    have hreg : sub.registered = false :=
-      registered_false_of_status hinv (by rw [hst]; intro h'; cases h')
-    have hvis : entrySequences (visible { sub with observed := sub.observed ++ [.failed e],
-                                                   status := .shutDown })
-        = entrySequences (visible sub) := by
-      simp [visible, hpend, entrySequences_append, entrySequences_failed]
-    constructor
-    · exact hinv.capacityPos
-    · exact hinv.capacity
-    · intro hr; have hr' : sub.registered = true := hr; simp [hreg] at hr'
-    · intro hr; have hr' : sub.registered = true := hr; simp [hreg] at hr'
-    · intro e' h'; cases h'
-    · intro e' h'; cases h'
-    · intro _; exact ⟨hreg, hpend⟩
-    · exact hinv.pendingMatch
-    · rw [hvis]; exact hinv.visibleStrict
-    · intro n hn; rw [hvis] at hn; exact hinv.visibleBound n hn
-    · intro h'; exact absurd hpend h'
+    exact Or.inl ⟨e, hst, rfl⟩
   · rename_i hst
     split at h
     · cases h
     · rename_i hne
       cases h
-      have hvis : entrySequences (visible { sub with observed := sub.observed ++ sub.pending.map Observed.entry,
-                                                     pending := [] })
-          = entrySequences (visible sub) := by
-        simp [visible]
-      constructor
-      · exact hinv.capacityPos
-      · exact Nat.zero_le _
-      · intro hr; have hr' : sub.registered = true := hr; exact hinv.registeredOpen hr'
-      · intro hr; have hr' : sub.registered = true := hr; exact hinv.registeredStream hr'
-      · intro e' h'; have h'' : sub.status = .closing e' := h'; simp [hst] at h''
-      · intro e' h'; have h'' : sub.status = .done e' := h'; simp [hst] at h''
-      · intro h'; have h'' : sub.status = .shutDown := h'; simp [hst] at h''
-      · intro m hm; cases hm
-      · rw [hvis]; exact hinv.visibleStrict
-      · intro n hn; rw [hvis] at hn; exact hinv.visibleBound n hn
-      · intro h'; exact absurd rfl h'
+      exact Or.inr (Or.inl ⟨hst, fun hnil => hne (List.isEmpty_iff.mpr hnil), rfl⟩)
   · rename_i e hst
     split at h
     · cases h
     · rename_i hne
       cases h
-      have hreg : sub.registered = false :=
-        registered_false_of_status hinv (by rw [hst]; intro h'; cases h')
-      have hvis : entrySequences (visible { sub with observed := sub.observed ++ sub.pending.map Observed.entry,
-                                                     pending := [], status := .done e })
-          = entrySequences (visible sub) := by
-        simp [visible]
-      constructor
-      · exact hinv.capacityPos
-      · exact Nat.zero_le _
-      · intro hr; have hr' : sub.registered = true := hr; simp [hreg] at hr'
-      · intro hr; have hr' : sub.registered = true := hr; simp [hreg] at hr'
-      · intro e' h'; cases h'
-      · intro e' _; rfl
-      · intro h'; cases h'
-      · intro m hm; cases hm
-      · rw [hvis]; exact hinv.visibleStrict
-      · intro n hn; rw [hvis] at hn; exact hinv.visibleBound n hn
-      · intro h'; exact absurd rfl h'
+      exact Or.inr (Or.inr ⟨e, hst, fun hnil => hne (List.isEmpty_iff.mpr hnil), rfl⟩)
+
+theorem pullStep_inv {s : SubState} {sub sub' : Subscriber} (hinv : SubInv s sub)
+    (h : pullStep sub = some sub') : SubInv s sub' := by
+  rcases pullStep_ok_eq h with ⟨e, hst, heq⟩ | ⟨hopen, _, heq⟩ | ⟨e, hst, _, heq⟩
+  · rw [heq]
+    have hpend : sub.pending = [] := hinv.doneEmpty e hst
+    have hreg : sub.registered = false :=
+      registered_false_of_status hinv (by rw [hst]; intro h'; cases h')
+    exact SubInv.pulled hinv hpend rfl rfl (entrySequences_visible_fail sub e)
+      (fun hr => absurd hr (by simp [hreg])) (fun _ he => by simp at he) (fun _ => hreg)
+      hinv.registeredStream
+  · rw [heq]
+    refine SubInv.pulled hinv rfl rfl rfl (congrArg entrySequences (visible_drain sub))
+      hinv.registeredOpen ?_ ?_ hinv.registeredStream
+    · intro e' he'
+      have h'' : sub.status = .closing e' := he'
+      simp [hopen] at h''
+    · intro h'
+      have h'' : sub.status = .shutDown := h'
+      simp [hopen] at h''
+  · rw [heq]
+    have hreg : sub.registered = false :=
+      registered_false_of_status hinv (by rw [hst]; intro h'; cases h')
+    refine SubInv.pulled hinv rfl rfl rfl (congrArg entrySequences (visible_drain_done sub e))
+      (fun hr => absurd hr (by simp [hreg])) ?_ ?_ hinv.registeredStream
+    · intro e' he'
+      have h'' : QueueStatus.done e = .closing e' := he'
+      simp at h''
+    · intro h'
+      have h'' : QueueStatus.done e = .shutDown := h'
+      simp at h''
 
 theorem unsubscribe_inv {s : SubState} {sub : Subscriber} (hinv : SubInv s sub) :
     SubInv s { sub with registered := false, pending := [], status := .shutDown } := by
@@ -305,10 +386,40 @@ theorem deliverOne_skip {stream : StreamName} {m : StoredMessage} {sub : Subscri
   unfold deliverOne
   rw [if_neg (by simp [hcond])]
 
+/-- On overflow the buffer is non-empty (`capacityPos`), so the failure is `closing`,
+not `done` — the drain-first discipline of Q2. -/
+theorem deliverOne_overflow_closing {s : SubState} {stream : StreamName} {m : StoredMessage}
+    {sub : Subscriber} {n : Nat} (hinv : SubInv s sub)
+    (hcond : (sub.stream == stream && sub.registered && matchesAny sub.filters m.subject) = true)
+    (hpol : sub.policy = .terminateOnLag n) (hfull : n ≤ sub.pending.length) :
+    deliverOne stream m sub =
+      { sub with registered := false,
+                 status := .closing (.consumerLagged stream sub.lastEnqueued) }
+    ∧ sub.pending ≠ [] := by
+  have hcapPos : 1 ≤ sub.policy.capacity := hinv.capacityPos
+  rw [hpol] at hcapPos
+  simp only [Policy.capacity] at hcapPos
+  have hne : sub.pending ≠ [] := fun hnil => by
+    rw [hnil] at hfull
+    simp at hfull
+    omega
+  have hempty : sub.pending.isEmpty = false := List.isEmpty_eq_false_iff.mpr hne
+  refine ⟨?_, hne⟩
+  rw [deliverOne_overflow hcond hpol hfull, if_neg (by rw [hempty]; decide)]
+
 theorem endOne_skip {name : StreamName} {sub : Subscriber}
     (hcond : (sub.stream == name && sub.registered) = false) : endOne name sub = sub := by
   unfold endOne
   rw [if_neg (by simp [hcond])]
+
+/-- The positive face of `endOne`: de-registration with the drain-then-fail status. -/
+theorem endOne_end {name : StreamName} {sub : Subscriber}
+    (hcond : (sub.stream == name && sub.registered) = true) : endOne name sub =
+      { sub with registered := false,
+                 status := if sub.pending.isEmpty then .done (.streamNotFound name)
+                           else .closing (.streamNotFound name) } := by
+  unfold endOne
+  rw [if_pos hcond]
 
 theorem deliverOne_inv {s s' : SubState} {stream : StreamName} {st : StreamState}
     {m : StoredMessage} {sub : Subscriber} (hinv : SubInv s sub)
@@ -326,21 +437,9 @@ theorem deliverOne_inv {s s' : SubState} {stream : StreamName} {st : StreamState
     cases hl₀
     cases hpol : sub.policy with
     | terminateOnLag n =>
-      have hcapPos : 1 ≤ sub.policy.capacity := hinv.capacityPos
-      rw [hpol] at hcapPos
-      simp only [Policy.capacity] at hcapPos
       by_cases hfull : n ≤ sub.pending.length
-      · rw [deliverOne_overflow hcond hpol hfull]
-        have hne : sub.pending ≠ [] := by
-          intro hnil
-          rw [hnil] at hfull
-          simp at hfull
-          omega
-        have hempty : sub.pending.isEmpty = false := by
-          cases hp : sub.pending with
-          | nil => exact absurd hp hne
-          | cons _ _ => rfl
-        rw [if_neg (by rw [hempty]; decide)]
+      · obtain ⟨heq, hne⟩ := deliverOne_overflow_closing hinv hcond hpol hfull
+        rw [heq]
         refine ⟨hinv.capacityPos, hinv.capacity, ?_, ?_, ?_, ?_, ?_, hinv.pendingMatch,
           hinv.visibleStrict, hinv.visibleBound, hinv.pendingLast⟩
         · intro hr; cases hr
@@ -373,7 +472,7 @@ theorem deliverOne_inv {s s' : SubState} {stream : StreamName} {st : StreamState
           · exact hinv.pendingMatch m' hold
           · rw [List.mem_singleton.mp hnew]; exact hmatch
         · rw [hvis]
-          apply pairwise_lt_append_singleton hinv.visibleStrict
+          apply pairwise_append_singleton hinv.visibleStrict
           intro y hy
           have := hinv.visibleBound y hy
           rw [hseq]
@@ -396,11 +495,8 @@ theorem endOne_inv {s s' : SubState} {name : StreamName} {sub : Subscriber} (hin
     (hcore : ∀ n st₀, n ≠ name → lookupStream s.core n = some st₀ →
       lookupStream s'.core n = some st₀) :
     SubInv s' (endOne name sub) := by
-  unfold endOne
-  split
-  · rename_i hcond
-    simp only [Bool.and_eq_true, beq_iff_eq] at hcond
-    obtain ⟨hstream, hreg⟩ := hcond
+  by_cases hcond : (sub.stream == name && sub.registered) = true
+  · rw [endOne_end hcond]
     refine ⟨hinv.capacityPos, hinv.capacity, ?_, ?_, ?_, ?_, ?_, hinv.pendingMatch,
       hinv.visibleStrict, hinv.visibleBound, hinv.pendingLast⟩
     · intro hr; cases hr
@@ -421,14 +517,13 @@ theorem endOne_inv {s s' : SubState} {name : StreamName} {sub : Subscriber} (hin
       have h' : (if sub.pending.isEmpty then QueueStatus.done (.streamNotFound name)
                   else .closing (.streamNotFound name)) = .shutDown := h
       split at h' <;> cases h'
-  · rename_i hcond
+  · rw [endOne_skip (by simpa using hcond)]
     refine SubInv.of_stream_lookup hinv ?_
-    intro hreg st₀ hl
+    intro hr st₀ hl
     have hne : sub.stream ≠ name := by
       intro heq
       apply hcond
-      simp only [Bool.and_eq_true, beq_iff_eq]
-      exact ⟨heq, hreg⟩
+      simp [heq, hr]
     exact ⟨st₀, hcore _ _ hne hl, Nat.le_refl _⟩
 
 end EffectNatsSubstrate

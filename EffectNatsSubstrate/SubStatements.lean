@@ -28,25 +28,6 @@ abbrev publishedMessage (subject : SubjectName) (seq : StreamSeq) (payload : Pay
 
 /-! ## The subscriber a successful operation leaves behind -/
 
-theorem applyOp_ok_eq {s s' : SubState} {o : Op} {r : Ret}
-    (h : applyOp deliverOne s o (.ok r) = some s') :
-    ∃ core', step s.core o = .ok (core', r) ∧ s' = afterOp deliverOne s core' o r := by
-  unfold applyOp at h
-  cases hstep : step s.core o with
-  | error err =>
-    rw [hstep] at h
-    simp at h
-  | ok p =>
-    obtain ⟨core', r₀⟩ := p
-    rw [hstep] at h
-    simp only at h
-    split at h
-    · rename_i hrr
-      cases h
-      subst hrr
-      exact ⟨core', rfl, rfl⟩
-    · cases h
-
 theorem afterOp_publish_sub {s : SubState} {core' : JSState} {stream : StreamName}
     {subject : SubjectName} {payload : PayloadHash} {headers : List (String × String)}
     {x : Option StreamSeq} {now : Nat} {seq : StreamSeq} {id : SubId} {sub sub' : Subscriber}
@@ -76,24 +57,13 @@ theorem register_observed {s s' : SubState} {stream : StreamName} {opts : Consum
       lookupSub s'.subs id = some (newSubscriber stream opts l₀ st.messages) := by
   have h' : applyRegister s stream opts l₀ id (.ok .unit) = some s' := h
   obtain ⟨hid, _⟩ := applyRegister_enabled h'
-  unfold applyRegister at h'
-  split at h'
-  · cases h'
-  · cases hl : lookupStream s.core stream with
-    | none =>
-      rw [hl] at h'
-      simp at h'
-    | some st =>
-      rw [hl] at h'
-      simp only at h'
-      split at h'
-      · cases h'
-        refine ⟨st, rfl, ?_⟩
-        apply lookupSub_append_fresh
-        intro p hp
-        rw [hid]
-        exact Nat.ne_of_lt (hs.2 p hp)
-      · cases h'
+  rcases applyRegister_ok_eq h' with ⟨_, he, _⟩ | ⟨st, hl', _, _, rfl⟩
+  · exact absurd he (by simp)
+  · refine ⟨st, hl', ?_⟩
+    apply lookupSub_append_fresh
+    intro p hp
+    rw [hid]
+    exact Nat.ne_of_lt (hs.2 p hp)
 
 /-! ## SA4c — `lastPerSubject` through `lastForSubject` -/
 
@@ -140,13 +110,11 @@ theorem memory_lastEnqueued_admissible {s : JSState} {stream : StreamName} {st :
     replayBound st.messages opts (st.nextSequence - 1) st.nextSequence = true := by
   have hbelow := (reachable_sequences_strict h hl).2
   have hpos := (reachable_positive h hl).1
-  unfold replayBound
-  rw [Bool.and_eq_true, List.all_eq_true]
+  rw [replayBound_eq_true_iff]
   refine ⟨?_, ?_⟩
   · intro m hm
-    have hlt : m.sequence < st.nextSequence := hbelow m (selectReplay_mem hm).1
-    exact decide_eq_true (Nat.le_sub_one_of_lt hlt)
-  · exact decide_eq_true (Nat.sub_one_lt (Nat.pos_iff_ne_zero.mp hpos))
+    exact Nat.le_sub_one_of_lt (hbelow m (selectReplay_mem hm).1)
+  · exact Nat.sub_one_lt (Nat.pos_iff_ne_zero.mp hpos)
 
 /-! ## SA5 — the consumer-visible sequence, per transition -/
 
@@ -165,13 +133,10 @@ theorem pull_visible {s s' : SubState} {id : SubId} {sub sub' : Subscriber}
     have ha' : lookupSub (updateSub s.subs id (fun _ => sub₁)) id = some sub' := ha
     rw [lookupSub_updateSub_self _ hb] at ha'
     cases ha'
-    unfold pullStep at hpull
-    rw [ho] at hpull
-    simp only at hpull
-    split at hpull
-    · cases hpull
-    · cases hpull
-      simp [visible]
+    rcases pullStep_ok_eq hpull with ⟨e, hst, heq⟩ | ⟨_, _, heq⟩ | ⟨e, hst, _, heq⟩
+    · rw [hst] at ho; cases ho
+    · rw [heq]; exact visible_drain sub
+    · rw [hst] at ho; cases ho
 
 theorem publish_visible {s : SubState} {stream : StreamName} {subject : SubjectName}
     {payload : PayloadHash} {headers : List (String × String)} {x : Option StreamSeq} {now : Nat}
@@ -199,44 +164,52 @@ theorem publish_visible {s : SubState} {stream : StreamName} {subject : SubjectN
       rw [deliverOne_overflow hcond hpol (Nat.le_of_eq hfull.symm)]
       exact ⟨rfl, rfl⟩
 
+/-- An operation that leaves the subscriber map untouched cannot change what the
+subscriber sees. -/
+theorem visible_eq_of_subs_unchanged {s s' : SubState} {sub sub' : Subscriber} {id : SubId}
+    (hb : lookupSub s.subs id = some sub) (ha : lookupSub s'.subs id = some sub')
+    (hsame : s'.subs = s.subs) : visible sub' = visible sub := by
+  rw [hsame] at ha
+  rw [hb] at ha
+  cases ha
+  rfl
+
 theorem op_visible_frame {s : SubState} {o : Op} {e : Expect} {s' : SubState} {id : SubId}
     {sub sub' : Subscriber} (h : apply s (.op o e) = some s')
     (hb : lookupSub s.subs id = some sub) (ha : lookupSub s'.subs id = some sub')
     (hnm : ∀ stream subject payload headers x now, o = .publish stream subject payload headers x now →
         (sub.stream ≠ stream ∨ matchesAny sub.filters subject = false))
     (hnd : ∀ name, o ≠ .deleteStream name) : visible sub' = visible sub := by
-  have h' : applyOp deliverOne s o e = some s' := h
-  unfold applyOp at h'
-  split at h'
-  · rename_i core' r r' hstep
-    split at h'
-    · cases h'
-      cases o with
-      | publish stream subject payload headers x now =>
-        cases r with
-        | sequence seq =>
-          obtain rfl := afterOp_publish_sub hb ha
-          rw [deliverOne_skip]
-          rcases hnm stream subject payload headers x now rfl with hne | hfalse
-          · simp [hne]
-          · simp [hfalse]
-        | unit => simp only [afterOp] at ha; rw [hb] at ha; cases ha; rfl
-        | config c => simp only [afterOp] at ha; rw [hb] at ha; cases ha; rfl
-        | message m => simp only [afterOp] at ha; rw [hb] at ha; cases ha; rfl
-      | deleteStream name => exact absurd rfl (hnd name)
-      | createStream raw => simp only [afterOp] at ha; rw [hb] at ha; cases ha; rfl
-      | getStream name => simp only [afterOp] at ha; rw [hb] at ha; cases ha; rfl
-      | lastMessageForSubject stream subject =>
-        simp only [afterOp] at ha; rw [hb] at ha; cases ha; rfl
-    · cases h'
-  · rename_i err err' hstep
-    split at h'
-    · cases h'
-      rw [hb] at ha
-      cases ha
-      rfl
-    · cases h'
-  · cases h'
+  cases e with
+  | ok r =>
+    obtain ⟨core', hstep, rfl⟩ :=
+      applyOp_ok_eq (deliver := deliverOne)
+        (show applyOp deliverOne s o (.ok r) = some s' from h)
+    cases o with
+    | publish stream subject payload headers x now =>
+      cases r with
+      | sequence seq =>
+        obtain rfl := afterOp_publish_sub hb ha
+        rw [deliverOne_skip]
+        rcases hnm stream subject payload headers x now rfl with hne | hfalse
+        · simp [hne]
+        · simp [hfalse]
+      | unit => exact visible_eq_of_subs_unchanged hb ha rfl
+      | config c => exact visible_eq_of_subs_unchanged hb ha rfl
+      | message m => exact visible_eq_of_subs_unchanged hb ha rfl
+    | deleteStream name => exact absurd rfl (hnd name)
+    | createStream raw => exact visible_eq_of_subs_unchanged hb ha rfl
+    | getStream name => exact visible_eq_of_subs_unchanged hb ha rfl
+    | lastMessageForSubject stream subject =>
+      exact visible_eq_of_subs_unchanged hb ha rfl
+  | error err =>
+    obtain ⟨heq, -⟩ :=
+      applyOp_error_eq (deliver := deliverOne)
+        (show applyOp deliverOne s o (.error err) = some s' from h)
+    rw [heq] at ha
+    rw [hb] at ha
+    cases ha
+    rfl
 
 theorem visible_sequences_strict {s : SubState} (h : ReachableSub s) :
     ∀ p ∈ s.subs, (entrySequences (visible p.2)).Pairwise (· < ·) :=
@@ -256,9 +229,8 @@ theorem delete_ends {s : SubState} {name : StreamName} {s' : SubState} {id : Sub
   simp only [afterOp] at ha
   rw [lookupSub_map, hb] at ha
   obtain rfl := (Option.some.inj ha).symm
-  unfold endOne
   have hcond : (sub.stream == name && sub.registered) = true := by simp [hs, hr]
-  rw [if_pos hcond]
+  rw [endOne_end hcond]
   refine ⟨rfl, ?_, rfl⟩
   dsimp only
   split
@@ -271,20 +243,14 @@ theorem create_restarts {s : SubState} {raw : RawStreamConfig} {s' : SubState} {
     st.nextSequence = 1 := by
   obtain ⟨core', hstep, rfl⟩ := applyOp_ok_eq h
   simp only [afterOp] at hst
-  have hc : createStep s.core raw = .ok (core', .unit) := hstep
-  unfold createStep at hc
-  split at hc
-  · cases hc
-  · rename_i config hval
-    have hname : config.name = raw.name := (validate_ok_sound hval).1
-    split at hc
-    · rename_i st₀ hlook
-      rw [hname, habsent] at hlook
-      cases hlook
-    · cases hc
-      rw [hname, lookup_insert] at hst
-      cases hst
-      rfl
+  rcases createStep_ok_shape (show createStep s.core raw = .ok (core', .unit) from hstep) with
+    rfl | ⟨config, hval, -, rfl⟩
+  · rw [habsent] at hst
+    cases hst
+  · have hname : config.name = raw.name := (validate_ok_sound hval).1
+    rw [hname, lookup_insert] at hst
+    cases hst
+    rfl
 
 /-! ## SA7 — T13′ through the lag invariant -/
 
@@ -322,32 +288,21 @@ theorem lagInv_deliverOne {s : SubState} {stream : StreamName} {m : StoredMessag
       simp only [Bool.and_eq_true] at hc
       exact hc.1.2
     have ho : sub.status = .opened := hinv.registeredOpen hreg
-    have hcapPos := hinv.capacityPos
     cases hpol : sub.policy with
     | terminateOnLag n =>
-      rw [hpol] at hcapPos
-      simp only [Policy.capacity] at hcapPos
       by_cases hfull : n ≤ sub.pending.length
-      · rw [deliverOne_overflow hcond hpol hfull]
-        have hne : sub.pending ≠ [] := by
-          intro hnil
-          rw [hnil] at hfull
-          simp at hfull
-          omega
-        have hempty : sub.pending.isEmpty = false := List.isEmpty_eq_false_iff.mpr hne
+      · obtain ⟨heq, _hne⟩ := deliverOne_overflow_closing hinv hcond hpol hfull
+        rw [heq]
         refine ⟨?_, ?_, ?_⟩
         · intro stream' n' h
-          have h' : (if sub.pending.isEmpty then QueueStatus.done (.consumerLagged stream sub.lastEnqueued)
-              else .closing (.consumerLagged stream sub.lastEnqueued))
+          have h' : QueueStatus.closing (.consumerLagged stream sub.lastEnqueued)
               = .closing (.consumerLagged stream' n') := h
-          rw [hempty, if_neg Bool.false_ne_true] at h'
-          cases h'
-          rfl
+          injection h' with h1
+          injection h1 with _ hn'
+          exact hn'.symm
         · intro stream' n' h
-          have h' : (if sub.pending.isEmpty then QueueStatus.done (.consumerLagged stream sub.lastEnqueued)
-              else .closing (.consumerLagged stream sub.lastEnqueued))
+          have h' : QueueStatus.closing (.consumerLagged stream sub.lastEnqueued)
               = .done (.consumerLagged stream' n') := h
-          rw [hempty, if_neg Bool.false_ne_true] at h'
           cases h'
         · intro stream' n' h
           exact hl.failedLag stream' n' h
@@ -366,9 +321,9 @@ theorem lagInv_deliverOne {s : SubState} {stream : StreamName} {m : StoredMessag
 
 theorem lagInv_endOne {name : StreamName} {sub : Subscriber} (hl : LagInv sub) :
     LagInv (endOne name sub) := by
-  unfold endOne
-  split
-  · refine ⟨?_, ?_, ?_⟩
+  by_cases hcond : (sub.stream == name && sub.registered) = true
+  · rw [endOne_end hcond]
+    refine ⟨?_, ?_, ?_⟩
     · intro stream' n' h
       have h' : (if sub.pending.isEmpty then QueueStatus.done (.streamNotFound name)
           else .closing (.streamNotFound name)) = .closing (.consumerLagged stream' n') := h
@@ -379,15 +334,13 @@ theorem lagInv_endOne {name : StreamName} {sub : Subscriber} (hl : LagInv sub) :
       split at h' <;> cases h'
     · intro stream' n' h
       exact hl.failedLag stream' n' h
-  · exact hl
+  · rw [endOne_skip (by simpa using hcond)]
+    exact hl
 
 theorem lagInv_pullStep {s : SubState} {sub sub' : Subscriber} (hinv : SubInv s sub)
     (hl : LagInv sub) (h : pullStep sub = some sub') : LagInv sub' := by
-  unfold pullStep at h
-  split at h
-  · cases h
-  · rename_i e hst
-    cases h
+  rcases pullStep_ok_eq h with ⟨e, hst, heq⟩ | ⟨hopen, hne', heq⟩ | ⟨e, hst, hne', heq⟩
+  · rw [heq]
     refine ⟨?_, ?_, ?_⟩
     · intro stream' n' h'; cases h'
     · intro stream' n' h'; cases h'
@@ -400,53 +353,31 @@ theorem lagInv_pullStep {s : SubState} {sub sub' : Subscriber} (hinv : SubInv s 
         = some n'
       rw [entrySequences_append, entrySequences_failed, List.append_nil]
       exact hl.doneLag stream' n' hst
-  · rename_i hst
-    split at h
-    · cases h
-    · rename_i hne
-      cases h
-      have hne' : sub.pending ≠ [] := fun hnil => hne (List.isEmpty_iff.mpr hnil)
-      refine ⟨?_, ?_, ?_⟩
-      · intro stream' n' h'
-        have h'' : sub.status = .closing (.consumerLagged stream' n') := h'
-        rw [hst] at h''
-        cases h''
-      · intro stream' n' h'
-        have h'' : sub.status = .done (.consumerLagged stream' n') := h'
-        rw [hst] at h''
-        cases h''
-      · intro stream' n' h'
-        exfalso
-        have h'' : (sub.observed ++ sub.pending.map Observed.entry).getLast?
-            = some (.failed (.consumerLagged stream' n')) := h'
-        rw [List.getLast?_append, List.getLast?_map] at h''
-        cases hlast : sub.pending.getLast? with
-        | none => exact hne' (List.getLast?_eq_none_iff.mp hlast)
-        | some x => rw [hlast] at h''; simp at h''
-  · rename_i e hst
-    split at h
-    · cases h
-    · rename_i hne
-      cases h
-      have hne' : sub.pending ≠ [] := fun hnil => hne (List.isEmpty_iff.mpr hnil)
-      refine ⟨?_, ?_, ?_⟩
-      · intro stream' n' h'; cases h'
-      · intro stream' n' h'
-        have h'' : QueueStatus.done e = .done (.consumerLagged stream' n') := h'
-        cases h''
-        show (entrySequences (sub.observed ++ sub.pending.map Observed.entry)).getLast? = some n'
-        rw [entrySequences_append, entrySequences_map_entry, List.getLast?_append,
-          hinv.pendingLast hne']
-        show some sub.lastEnqueued = some n'
-        rw [hl.closingLag stream' n' hst]
-      · intro stream' n' h'
-        exfalso
-        have h'' : (sub.observed ++ sub.pending.map Observed.entry).getLast?
-            = some (.failed (.consumerLagged stream' n')) := h'
-        rw [List.getLast?_append, List.getLast?_map] at h''
-        cases hlast : sub.pending.getLast? with
-        | none => exact hne' (List.getLast?_eq_none_iff.mp hlast)
-        | some x => rw [hlast] at h''; simp at h''
+  · rw [heq]
+    refine ⟨?_, ?_, ?_⟩
+    · intro stream' n' h'
+      have h'' : sub.status = .closing (.consumerLagged stream' n') := h'
+      rw [hopen] at h''
+      cases h''
+    · intro stream' n' h'
+      have h'' : sub.status = .done (.consumerLagged stream' n') := h'
+      rw [hopen] at h''
+      cases h''
+    · intro stream' n' h'
+      exact absurd h' (getLast?_visible_ne_failed hne').elim
+  · rw [heq]
+    refine ⟨?_, ?_, ?_⟩
+    · intro stream' n' h'; cases h'
+    · intro stream' n' h'
+      have h'' : QueueStatus.done e = .done (.consumerLagged stream' n') := h'
+      cases h''
+      show (entrySequences (sub.observed ++ sub.pending.map Observed.entry)).getLast? = some n'
+      rw [entrySequences_append, entrySequences_map_entry, List.getLast?_append,
+        hinv.pendingLast hne']
+      show some sub.lastEnqueued = some n'
+      rw [hl.closingLag stream' n' hst]
+    · intro stream' n' h'
+      exact absurd h' (getLast?_visible_ne_failed hne').elim
 
 theorem lagInv_unsubscribe {sub : Subscriber} (hl : LagInv sub) :
     LagInv { sub with registered := false, pending := [], status := .shutDown } := by
@@ -470,73 +401,60 @@ theorem lagState_afterOp {s : SubState} {core' : JSState} {o : Op} {r : Ret}
     exact lagInv_endOne (hl q hq)
   · exact hl
 
+theorem lagState_applyOp {s s' : SubState} {o : Op} {e : Expect}
+    (hinv : StateInv s) (hl : LagState s) (h : applyOp deliverOne s o e = some s') :
+    LagState s' := by
+  cases e with
+  | ok r =>
+    obtain ⟨core', hstep, rfl⟩ := applyOp_ok_eq h
+    exact lagState_afterOp hinv hl
+  | error err =>
+    obtain ⟨heq, -⟩ := applyOp_error_eq h
+    rw [heq]
+    exact hl
+
+theorem lagState_applyRegister {s s' : SubState} {stream : StreamName} {opts : ConsumeOptions}
+    {l₀ : StreamSeq} {id : SubId} {e : Expect} (hinv : StateInv s) (hl : LagState s)
+    (h : applyRegister s stream opts l₀ id e = some s') : LagState s' := by
+  rcases applyRegister_ok_eq h with ⟨-, -, rfl⟩ | ⟨st, -, -, -, rfl⟩
+  · exact hl
+  · intro p hp
+    have hp' : p ∈ s.subs ++ [(id, newSubscriber stream opts l₀ st.messages)] := hp
+    rcases List.mem_append.mp hp' with hold | hnew
+    · exact hl p hold
+    · rw [List.mem_singleton.mp hnew]
+      exact lagInv_newSubscriber stream opts l₀ st.messages
+
+theorem lagState_applyPull {s s' : SubState} {id : SubId} (hinv : StateInv s) (hl : LagState s)
+    (h : applyPull pullStep s id = some s') : LagState s' := by
+  obtain ⟨sub, sub', hsub, hpull, rfl⟩ := applyPull_ok_eq h
+  intro p hp
+  rcases mem_updateSub hp with hold | ⟨_, _, hp2⟩
+  · exact hl p hold
+  · rw [hp2]
+    exact lagInv_pullStep (hinv _ (mem_of_lookupSub hsub)) (hl _ (mem_of_lookupSub hsub)) hpull
+
+theorem lagState_applyUnsubscribe {s s' : SubState} {id : SubId} (hl : LagState s)
+    (h : applyUnsubscribe s id = some s') : LagState s' := by
+  obtain ⟨sub, hsub, -, rfl⟩ := applyUnsubscribe_ok_eq h
+  intro p hp
+  rcases mem_updateSub hp with hold | ⟨sub₀, h₀, hp2⟩
+  · exact hl p hold
+  · rw [hp2]
+    exact lagInv_unsubscribe (hl _ h₀)
+
 theorem apply_lag {s s' : SubState} {l : Label} (hinv : StateInv s) (hl : LagState s)
     (h : apply s l = some s') : LagState s' := by
   cases l with
   | op o e =>
-    have h' : applyOp deliverOne s o e = some s' := h
-    unfold applyOp at h'
-    split at h'
-    · rename_i core' r r' hstep
-      split at h'
-      · cases h'; exact lagState_afterOp hinv hl
-      · cases h'
-    · rename_i err err' hstep
-      split at h'
-      · cases h'; exact hl
-      · cases h'
-    · cases h'
+    exact lagState_applyOp hinv hl (show applyOp deliverOne s o e = some s' from h)
   | register stream opts l₀ id e =>
-    have h' : applyRegister s stream opts l₀ id e = some s' := h
-    unfold applyRegister at h'
-    split at h'
-    · cases h'
-    · split at h'
-      · split at h'
-        · cases h'; exact hl
-        · cases h'
-      · split at h'
-        · cases h'
-          intro p hp
-          have hp' : p ∈ s.subs ++ [(id, newSubscriber stream opts l₀ _)] := hp
-          rcases List.mem_append.mp hp' with hold | hnew
-          · exact hl p hold
-          · rw [List.mem_singleton.mp hnew]
-            exact lagInv_newSubscriber _ _ _ _
-        · cases h'
-      · cases h'
+    exact lagState_applyRegister hinv hl
+      (show applyRegister s stream opts l₀ id e = some s' from h)
   | pull id =>
-    have h' : applyPull pullStep s id = some s' := h
-    unfold applyPull at h'
-    split at h'
-    · cases h'
-    · rename_i sub hsub
-      split at h'
-      · cases h'
-      · rename_i sub' hpull
-        cases h'
-        intro p hp
-        have hp' : p ∈ updateSub s.subs id (fun _ => sub') := hp
-        rcases mem_updateSub hp' with hold | ⟨_, _, hp2⟩
-        · exact hl p hold
-        · rw [hp2]
-          exact lagInv_pullStep (hinv _ (mem_of_lookupSub hsub)) (hl _ (mem_of_lookupSub hsub)) hpull
+    exact lagState_applyPull hinv hl (show applyPull pullStep s id = some s' from h)
   | unsubscribe id =>
-    have h' : applyUnsubscribe s id = some s' := h
-    unfold applyUnsubscribe at h'
-    split at h'
-    · cases h'
-    · rename_i sub hsub
-      split at h'
-      · cases h'
-      · cases h'
-        intro p hp
-        have hp' : p ∈ updateSub s.subs id
-            (fun sub => { sub with registered := false, pending := [], status := .shutDown }) := hp
-        rcases mem_updateSub hp' with hold | ⟨sub₀, h₀, hp2⟩
-        · exact hl p hold
-        · rw [hp2]
-          exact lagInv_unsubscribe (hl _ h₀)
+    exact lagState_applyUnsubscribe hl (show applyUnsubscribe s id = some s' from h)
 
 theorem lagState_reachable {s : SubState} (h : ReachableSub s) : LagState s :=
   reachableSub_all (fun _ hp => nomatch hp) (fun _ hinv hl hnext => apply_lag hinv hl hnext) h

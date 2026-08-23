@@ -1,5 +1,6 @@
 import EffectNatsSubstrate.SubInvariants
 import EffectNatsSubstrate.Invariants
+import EffectNatsSubstrate.Views
 
 /-!
 # Stage-A proof infrastructure
@@ -145,6 +146,12 @@ theorem createStep_ok_shape {s s' : JSState} {raw : RawStreamConfig} {r : Ret}
       cases h
       exact Or.inr ⟨config, hval, hlook, rfl⟩
 
+theorem replayBound_eq_true_iff {messages : List StoredMessage} {opts : ConsumeOptions}
+    {l₀ nextSeq : Nat} :
+    replayBound messages opts l₀ nextSeq = true ↔
+      (∀ m ∈ selectReplay messages opts, m.sequence ≤ l₀) ∧ l₀ < nextSeq := by
+  simp [replayBound, Bool.and_eq_true, List.all_eq_true, decide_eq_true_eq]
+
 theorem getStep_ok_eq {s s' : JSState} {name : StreamName} {r : Ret}
     (h : getStep s name = .ok (s', r)) : s' = s := by
   unfold getStep at h
@@ -206,18 +213,6 @@ theorem entrySequences_entry_singleton (m : StoredMessage) :
 
 theorem entrySequences_failed (e : SubError) : entrySequences [Observed.failed e] = [] := rfl
 
-theorem mem_entrySequences {obs : List Observed} {n : StreamSeq} :
-    n ∈ entrySequences obs ↔ ∃ m, Observed.entry m ∈ obs ∧ m.sequence = n := by
-  simp only [entrySequences, List.mem_filterMap]
-  constructor
-  · rintro ⟨o, ho, hn⟩
-    cases o with
-    | entry m => exact ⟨m, ho, by simpa using hn⟩
-    | caughtUp => simp at hn
-    | failed e => simp at hn
-  · rintro ⟨m, hm, hn⟩
-    exact ⟨.entry m, hm, by simp [hn]⟩
-
 /-! ## Equations for `visible` across an admitted message or a drain -/
 
 theorem entrySequences_visible_admit (sub : Subscriber) (m : StoredMessage) :
@@ -225,6 +220,23 @@ theorem entrySequences_visible_admit (sub : Subscriber) (m : StoredMessage) :
       = entrySequences (visible sub) ++ [m.sequence] := by
   simp [visible, entrySequences_append, entrySequences_map_entry, entrySequences_entry_singleton,
     List.map_append]
+
+/-- A recorded failure adds no entry sequence, whatever is still buffered. -/
+theorem entrySequences_visible_fail (sub : Subscriber) (e : SubError) :
+    entrySequences (visible { sub with observed := sub.observed ++ [Observed.failed e],
+                                       status := .shutDown })
+      = entrySequences (visible sub) := by
+  simp only [visible]
+  rw [entrySequences_append, entrySequences_append, entrySequences_failed, List.append_nil,
+    entrySequences_append]
+
+/-- Registration's visible sequences are exactly the replay, without the `caughtUp` marker. -/
+theorem entrySequences_visible_newSubscriber (stream : StreamName) (opts : ConsumeOptions)
+    (l₀ : StreamSeq) (messages : List StoredMessage) :
+    entrySequences (visible (newSubscriber stream opts l₀ messages))
+      = (selectReplay messages opts).map (·.sequence) := by
+  simp [visible, newSubscriber, replayObserved, entrySequences_append, entrySequences_map_entry,
+    entrySequences_caughtUp]
 
 theorem visible_admit (sub : Subscriber) (m : StoredMessage) :
     visible { sub with pending := sub.pending ++ [m], lastEnqueued := m.sequence }
@@ -242,14 +254,15 @@ theorem visible_drain_done (sub : Subscriber) (e : SubError) :
       = visible sub := by
   simp [visible]
 
-theorem pairwise_lt_append_singleton {l : List Nat} {x : Nat}
-    (h : l.Pairwise (· < ·)) (hx : ∀ y ∈ l, y < x) : (l ++ [x]).Pairwise (· < ·) := by
-  rw [List.pairwise_append]
-  refine ⟨h, List.pairwise_singleton _ _, ?_⟩
-  intro a ha b hb
-  simp only [List.mem_singleton] at hb
-  subst hb
-  exact hx a ha
+theorem getLast?_visible_ne_failed {sub : Subscriber} {e : SubError}
+    (hne : sub.pending ≠ []) :
+    (sub.observed ++ sub.pending.map Observed.entry).getLast?
+      ≠ some (Observed.failed e) := by
+  intro h''
+  rw [List.getLast?_append, List.getLast?_map] at h''
+  cases hlast : sub.pending.getLast? with
+  | none => exact absurd (List.getLast?_eq_none_iff.mp hlast) hne
+  | some x => rw [hlast] at h''; simp at h''
 
 theorem pairwise_sublist_of_append_left {l₁ l₂ : List Nat}
     (h : (l₁ ++ l₂).Pairwise (· < ·)) : l₁.Pairwise (· < ·) :=
@@ -270,5 +283,29 @@ theorem SubInv.of_stream_lookup {s s' : SubState} {sub : Subscriber} (hinv : Sub
   obtain ⟨st₀, hl, hlt⟩ := hinv.registeredStream hr
   obtain ⟨st₁, hl', hle⟩ := hcore hr _ hl
   exact ⟨st₁, hl', Nat.lt_of_lt_of_le hlt hle⟩
+
+/-- A drain: the buffer emptied into `observed`, with the status and registration flag possibly
+changed. Every clause discharges from the old invariant plus where the entries went; the three
+`pullStep` success arms are its instances. -/
+theorem SubInv.pulled {s : SubState} {sub sub' : Subscriber} (hinv : SubInv s sub)
+    (hempty : sub'.pending = []) (hpol : sub'.policy = sub.policy)
+    (hlast : sub'.lastEnqueued = sub.lastEnqueued)
+    (hvis : entrySequences (visible sub') = entrySequences (visible sub))
+    (hopen : sub'.registered = true → sub'.status = .opened)
+    (hclosing : ∀ e, sub'.status ≠ .closing e)
+    (hshut : sub'.status = .shutDown → sub'.registered = false)
+    (hstream : sub'.registered = true → ∃ st₀, lookupStream s.core sub'.stream = some st₀ ∧
+      sub'.lastEnqueued < st₀.nextSequence) :
+    SubInv s sub' := by
+  refine ⟨?_, ?_, hopen, hstream, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  · rw [hpol]; exact hinv.capacityPos
+  · rw [hempty]; exact Nat.zero_le _
+  · intro e he; exact absurd he (hclosing e)
+  · intro _ _; exact hempty
+  · intro he; exact ⟨hshut he, hempty⟩
+  · intro m hm; rw [hempty] at hm; cases hm
+  · rw [hvis]; exact hinv.visibleStrict
+  · intro n hn; rw [hvis] at hn; rw [hlast]; exact hinv.visibleBound n hn
+  · intro hcon; rw [hempty] at hcon; exact absurd rfl hcon
 
 end EffectNatsSubstrate

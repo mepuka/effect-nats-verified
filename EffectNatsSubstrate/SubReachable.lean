@@ -149,77 +149,51 @@ theorem afterOp_inv {s : SubState} {core' : JSState} {o : Op} {r : Ret}
 
 theorem applyOp_inv {s s' : SubState} {o : Op} {e : Expect} (hinv : StateInv s)
     (h : applyOp deliverOne s o e = some s') : StateInv s' := by
-  unfold applyOp at h
-  split at h
-  · rename_i core' r r' hstep
-    split at h
-    · cases h; exact afterOp_inv hinv hstep
-    · cases h
-  · rename_i err err' hstep
-    split at h
-    · cases h; exact hinv
-    · cases h
-  · cases h
+  rcases e with r | err
+  · obtain ⟨core', hstep, hs'⟩ := applyOp_ok_eq h
+    rw [hs']
+    exact afterOp_inv hinv hstep
+  · obtain ⟨hs', -⟩ := applyOp_error_eq h
+    rw [hs']
+    exact hinv
 
 theorem applyRegister_inv {s s' : SubState} {stream : StreamName} {opts : ConsumeOptions}
     {l₀ : StreamSeq} {id : SubId} {e : Expect}
     (hreach : Reachable s.core) (hinv : StateInv s)
     (h : applyRegister s stream opts l₀ id e = some s') : StateInv s' := by
   have hcap : opts.buffer.capacity ≠ 0 := (applyRegister_enabled h).2
-  unfold applyRegister at h
-  split at h
-  · cases h
-  · rename_i _hguard
-    split at h
-    · split at h
-      · cases h; exact hinv
-      · cases h
-    · rename_i st hl
-      split at h
-      · rename_i hbound
-        cases h
-        intro p hp
-        have hp' : p ∈ s.subs ++ [(id, newSubscriber stream opts l₀ st.messages)] := hp
-        rcases List.mem_append.mp hp' with hold | hnew
-        · exact (hinv p hold).core_eq rfl
-        · rw [List.mem_singleton.mp hnew]
-          exact newSubscriber_inv hl hcap hbound (reachable_sequences_strict hreach hl).1
-      · cases h
-    · cases h
+  rcases applyRegister_ok_eq h with ⟨_, _, heq⟩ | ⟨st, hl, _, hb, heq⟩
+  · rw [heq]; exact hinv
+  · rw [heq]
+    intro p hp
+    have hp' : p ∈ s.subs ++ [(id, newSubscriber stream opts l₀ st.messages)] := hp
+    rcases List.mem_append.mp hp' with hold | hnew
+    · exact (hinv p hold).core_eq rfl
+    · rw [List.mem_singleton.mp hnew]
+      exact newSubscriber_inv hl hcap hb (reachable_sequences_strict hreach hl).1
 
 theorem applyPull_inv {s s' : SubState} {id : SubId} (hinv : StateInv s)
     (h : applyPull pullStep s id = some s') : StateInv s' := by
-  unfold applyPull at h
-  split at h
-  · cases h
-  · rename_i sub hsub
-    split at h
-    · cases h
-    · rename_i sub' hpull
-      cases h
-      intro p hp
-      have hp' : p ∈ updateSub s.subs id (fun _ => sub') := hp
-      rcases mem_updateSub hp' with hold | ⟨_, _, hp2⟩
-      · exact (hinv p hold).core_eq rfl
-      · rw [hp2]
-        exact (pullStep_inv (hinv _ (mem_of_lookupSub hsub)) hpull).core_eq rfl
+  obtain ⟨sub, sub', hsub, hpull, heq⟩ := applyPull_ok_eq h
+  rw [heq]
+  intro p hp
+  have hp' : p ∈ updateSub s.subs id (fun _ => sub') := hp
+  rcases mem_updateSub hp' with hold | ⟨_, _, hp2⟩
+  · exact (hinv p hold).core_eq rfl
+  · rw [hp2]
+    exact (pullStep_inv (hinv _ (mem_of_lookupSub hsub)) hpull).core_eq rfl
 
 theorem applyUnsubscribe_inv {s s' : SubState} {id : SubId} (hinv : StateInv s)
     (h : applyUnsubscribe s id = some s') : StateInv s' := by
-  unfold applyUnsubscribe at h
-  split at h
-  · cases h
-  · rename_i sub hsub
-    split at h
-    · cases h
-    · cases h
-      intro p hp
-      have hp' : p ∈ updateSub s.subs id
-          (fun sub => { sub with registered := false, pending := [], status := .shutDown }) := hp
-      rcases mem_updateSub hp' with hold | ⟨sub₀, h₀, hp2⟩
-      · exact (hinv p hold).core_eq rfl
-      · rw [hp2]
-        exact (unsubscribe_inv (hinv _ h₀)).core_eq rfl
+  obtain ⟨sub, hsub, _, heq⟩ := applyUnsubscribe_ok_eq h
+  rw [heq]
+  intro p hp
+  have hp' : p ∈ updateSub s.subs id
+      (fun sub => { sub with registered := false, pending := [], status := .shutDown }) := hp
+  rcases mem_updateSub hp' with hold | ⟨sub₀, h₀, hp2⟩
+  · exact (hinv p hold).core_eq rfl
+  · rw [hp2]
+    exact (unsubscribe_inv (hinv _ h₀)).core_eq rfl
 
 theorem apply_inv {s s' : SubState} {l : Label} (hreach : Reachable s.core) (hinv : StateInv s)
     (h : apply s l = some s') : StateInv s' := by
@@ -355,80 +329,64 @@ theorem apply_shape {s s' : SubState} {l : Label} (h : apply s l = some s') (hs 
     SubShape s' := by
   cases l with
   | op o e =>
-    have h' : applyOp deliverOne s o e = some s' := h
-    unfold applyOp at h'
-    split at h'
-    · rename_i core' r r' hstep
-      split at h'
-      · cases h'
-        unfold afterOp
-        split
-        · exact shape_of_keys hs (keys_map_snd _ _) (Nat.le_refl _)
-        · exact shape_of_keys hs (keys_map_snd _ _) (Nat.le_refl _)
-        · exact shape_of_keys hs rfl (Nat.le_refl _)
-      · cases h'
-    · rename_i err err' hstep
-      split at h'
-      · cases h'; exact hs
-      · cases h'
-    · cases h'
+    cases e with
+    | ok r =>
+      obtain ⟨core', hstep, rfl⟩ :=
+        applyOp_ok_eq (deliver := deliverOne)
+          (show applyOp deliverOne s o (.ok r) = some s' from h)
+      unfold afterOp
+      split
+      · exact shape_of_keys hs (keys_map_snd _ _) (Nat.le_refl _)
+      · exact shape_of_keys hs (keys_map_snd _ _) (Nat.le_refl _)
+      · exact shape_of_keys hs rfl (Nat.le_refl _)
+    | error err =>
+      obtain ⟨heq, -⟩ :=
+        applyOp_error_eq (deliver := deliverOne)
+          (show applyOp deliverOne s o (.error err) = some s' from h)
+      rw [heq]
+      exact hs
   | register stream opts l₀ id e =>
-    have h' : applyRegister s stream opts l₀ id e = some s' := h
-    obtain ⟨hid, _⟩ := applyRegister_enabled h'
-    unfold applyRegister at h'
-    split at h'
-    · cases h'
-    · split at h'
-      · split at h'
-        · cases h'; exact hs
-        · cases h'
-      · split at h'
-        · cases h'
-          obtain ⟨hasc, hids⟩ := hs
-          refine ⟨?_, ?_⟩
-          · show ((s.subs ++ [(id, _)]).map Prod.fst).Pairwise (· < ·)
-            rw [List.map_append]
-            apply pairwise_lt_append_singleton hasc
-            intro y hy
-            obtain ⟨q, hq, hqy⟩ := List.mem_map.mp hy
-            rw [← hqy, hid]
-            exact hids q hq
-          · intro p hp
-            have hp' : p ∈ s.subs ++ [(id, _)] := hp
-            rcases List.mem_append.mp hp' with hold | hnew
-            · show p.1 < id + 1
-              have := hids p hold
-              rw [← hid] at this
-              exact Nat.lt_succ_of_lt this
-            · rw [List.mem_singleton.mp hnew]
-              exact Nat.lt_succ_self id
-        · cases h'
-      · cases h'
+    obtain ⟨hid, _⟩ :=
+      applyRegister_enabled (show applyRegister s stream opts l₀ id e = some s' from h)
+    rcases applyRegister_ok_eq (s' := s')
+        (show applyRegister s stream opts l₀ id e = some s' from h)
+      with ⟨_, _, heq⟩ | ⟨st, hl, _, _, heq⟩
+    · rw [heq]; exact hs
+    · rw [heq]
+      obtain ⟨hasc, hids⟩ := hs
+      refine ⟨?_, ?_⟩
+      · show ((s.subs ++ [(id, _)]).map Prod.fst).Pairwise (· < ·)
+        rw [List.map_append]
+        apply pairwise_append_singleton hasc
+        intro y hy
+        obtain ⟨q, hq, hqy⟩ := List.mem_map.mp hy
+        rw [← hqy, hid]
+        exact hids q hq
+      · intro p hp
+        have hp' : p ∈ s.subs ++ [(id, _)] := hp
+        rcases List.mem_append.mp hp' with hold | hnew
+        · show p.1 < id + 1
+          have := hids p hold
+          rw [← hid] at this
+          exact Nat.lt_succ_of_lt this
+        · rw [List.mem_singleton.mp hnew]
+          exact Nat.lt_succ_self id
   | pull id =>
-    have h' : applyPull pullStep s id = some s' := h
-    unfold applyPull at h'
-    split at h'
-    · cases h'
-    · split at h'
-      · cases h'
-      · cases h'
-        exact shape_of_keys hs (updateSub_keys _ _ _) (Nat.le_refl _)
+    obtain ⟨_, _, _, _, heq⟩ :=
+      applyPull_ok_eq (s' := s') (show applyPull pullStep s id = some s' from h)
+    refine shape_of_keys hs ?_ ?_
+    · rw [heq]; exact updateSub_keys _ _ _
+    · rw [heq]; exact Nat.le_refl _
   | unsubscribe id =>
-    have h' : applyUnsubscribe s id = some s' := h
-    unfold applyUnsubscribe at h'
-    split at h'
-    · cases h'
-    · split at h'
-      · cases h'
-      · cases h'
-        exact shape_of_keys hs (updateSub_keys _ _ _) (Nat.le_refl _)
+    obtain ⟨_, _, _, heq⟩ :=
+      applyUnsubscribe_ok_eq (s' := s') (show applyUnsubscribe s id = some s' from h)
+    refine shape_of_keys hs ?_ ?_
+    · rw [heq]; exact updateSub_keys _ _ _
+    · rw [heq]; exact Nat.le_refl _
 
 /-- The state shape holds on every reachable state: ids strictly ascending, all below `nextId`. -/
 theorem subShape_reachable {s : SubState} (h : ReachableSub s) : SubShape s :=
   reachableSub_all ⟨List.Pairwise.nil, fun _ hp => nomatch hp⟩
     (fun _ _ hs hnext => apply_shape hnext hs) h
-
-theorem lookupSub_nextId {s : SubState} (hs : SubShape s) : lookupSub s.subs s.nextId = none :=
-  lookupSub_none_of_fresh (fun p hp => Nat.ne_of_lt (hs.2 p hp))
 
 end EffectNatsSubstrate

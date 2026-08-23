@@ -26,20 +26,6 @@ namespace EffectNatsSubstrate
 
 /-! ## List lemmas (core-only; hand-rolled where core names are unstable) -/
 
-private theorem pairwise_of_sublist {α : Type} {R : α → α → Prop} :
-    ∀ {l₁ l₂ : List α}, l₁.Sublist l₂ → l₂.Pairwise R → l₁.Pairwise R := by
-  intro l₁ l₂ h
-  induction h with
-  | slnil => intro _; exact .nil
-  | cons a _ ih =>
-    intro hp
-    cases hp with
-    | cons _ hp => exact ih hp
-  | cons_cons a h ih =>
-    intro hp
-    cases hp with
-    | cons ha hp => exact .cons (fun b hb => ha b (h.subset hb)) (ih hp)
-
 theorem dropOldest_sublist (ms : List StoredMessage) (subject : SubjectName) (n : Nat) :
     (dropOldest ms subject n).Sublist ms := by
   induction ms generalizing n with
@@ -71,6 +57,19 @@ theorem publishBase_sublist (st : StreamState) (subject : SubjectName) (rollup :
   split
   · exact List.filter_sublist
   · exact List.Sublist.refl _
+
+/-- A stored message after a commit was stored before, or is the committed one. -/
+theorem mem_applyPublish {st : StreamState} {subject : SubjectName} {payload : PayloadHash}
+    {headers : List (String × String)} {rollup : Bool} {now : Nat} {m : StoredMessage}
+    (h : m ∈ (applyPublish st subject payload headers rollup now).1.messages) :
+    m ∈ st.messages ∨ m = newMessage st subject payload headers now := by
+  simp only [applyPublish] at h
+  rcases List.mem_append.mp
+      ((pruneSubject_sublist
+        (publishBase st subject rollup ++ [newMessage st subject payload headers now])
+        subject st.config.maxMessagesPerSubject).subset h) with hold | hnew
+  · exact Or.inl ((publishBase_sublist st subject rollup).subset hold)
+  · exact Or.inr (List.mem_singleton.mp hnew)
 
 /-! ## Association-list lemmas -/
 
@@ -211,7 +210,7 @@ theorem applyPublish_inv {st : StreamState} (h : streamInv st)
   have hbase := publishBase_sublist st subject rollup
   have hbasePair : (publishBase st subject rollup).Pairwise
       (fun a b => a.sequence < b.sequence) :=
-    pairwise_of_sublist hbase h.1
+    List.Pairwise.sublist hbase h.1
   have hbaseBound : ∀ m ∈ publishBase st subject rollup, m.sequence < st.nextSequence :=
     fun m hm => h.2 m (hbase.subset hm)
   have happPair : ((publishBase st subject rollup)
@@ -231,7 +230,7 @@ theorem applyPublish_inv {st : StreamState} (h : streamInv st)
   have hsub := pruneSubject_sublist
     ((publishBase st subject rollup) ++ [newMessage st subject payload headers now])
     subject st.config.maxMessagesPerSubject
-  exact ⟨pairwise_of_sublist hsub happPair, fun m hm => happBound m (hsub.subset hm)⟩
+  exact ⟨List.Pairwise.sublist hsub happPair, fun m hm => happBound m (hsub.subset hm)⟩
 
 theorem commitPublish_inv {s : JSState} {stream : StreamName} {st : StreamState}
     {subject : SubjectName} {payload : PayloadHash}
@@ -498,13 +497,9 @@ theorem reachable_positive {s : JSState} {name : StreamName} {st : StreamState}
     (fun st subject payload headers rollup now hst => by
       refine ⟨Nat.succ_pos _, ?_⟩
       intro m hm
-      simp only [applyPublish] at hm
-      have hsub := pruneSubject_sublist
-        (publishBase st subject rollup ++ [newMessage st subject payload headers now])
-        subject st.config.maxMessagesPerSubject
-      cases List.mem_append.mp (hsub.subset hm) with
-      | inl h => exact hst.2 m ((publishBase_sublist st subject rollup).subset h)
-      | inr h => rw [List.mem_singleton.mp h]; exact hst.1)
+      rcases mem_applyPublish hm with hold | hnew
+      · exact hst.2 m hold
+      · rw [hnew]; exact hst.1)
     hr _ (lookup_mem hl)
 
 /-- T6, bound: a positive `maxMessagesPerSubject` bounds every subject's
