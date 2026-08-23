@@ -275,12 +275,6 @@ theorem SubInv.of_lookups {s s' : SubState} {sub : Subscriber} (hinv : SubInv s 
 
 /-! ## Preservation under fan-out and deletion -/
 
-theorem entrySequences_visible_admit (sub : Subscriber) (m : StoredMessage) :
-    entrySequences (visible { sub with pending := sub.pending ++ [m], lastEnqueued := m.sequence })
-      = entrySequences (visible sub) ++ [m.sequence] := by
-  simp [visible, entrySequences_append, entrySequences_map_entry, entrySequences_entry_singleton,
-    List.map_append]
-
 theorem deliverOne_inv {s s' : SubState} {stream : StreamName} {st : StreamState}
     {m : StoredMessage} {sub : Subscriber} (hinv : SubInv s sub)
     (hl : lookupStream s.core stream = some st) (hseq : m.sequence = st.nextSequence)

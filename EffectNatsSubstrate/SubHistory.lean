@@ -305,22 +305,6 @@ theorem liveOf_admit (committed : List (StreamName × StoredMessage)) (sub : Sub
     liveOf committed { sub with pending := sub.pending ++ [m], lastEnqueued := m.sequence } r
       = liveOf committed sub r := rfl
 
-theorem visible_admit (sub : Subscriber) (m : StoredMessage) :
-    visible { sub with pending := sub.pending ++ [m], lastEnqueued := m.sequence }
-      = visible sub ++ [Observed.entry m] := by
-  simp [visible, List.map_append, List.append_assoc]
-
-theorem visible_drain (sub : Subscriber) :
-    visible { sub with observed := sub.observed ++ sub.pending.map Observed.entry, pending := [] }
-      = visible sub := by
-  simp [visible]
-
-theorem visible_drain_done (sub : Subscriber) (e : SubError) :
-    visible { sub with observed := sub.observed ++ sub.pending.map Observed.entry, pending := [],
-                       status := QueueStatus.done e }
-      = visible sub := by
-  simp [visible]
-
 theorem histInv_publish {sH : SubStateH} {stream : StreamName} {subject : SubjectName}
     {payload : PayloadHash} {headers : List (String × String)} {x : Option StreamSeq} {now : Nat}
     {core' : JSState} {r : Ret} (hsinv : StateInv sH.base) (hinv : HistInv sH)

@@ -218,6 +218,30 @@ theorem mem_entrySequences {obs : List Observed} {n : StreamSeq} :
   · rintro ⟨m, hm, hn⟩
     exact ⟨.entry m, hm, by simp [hn]⟩
 
+/-! ## Equations for `visible` across an admitted message or a drain -/
+
+theorem entrySequences_visible_admit (sub : Subscriber) (m : StoredMessage) :
+    entrySequences (visible { sub with pending := sub.pending ++ [m], lastEnqueued := m.sequence })
+      = entrySequences (visible sub) ++ [m.sequence] := by
+  simp [visible, entrySequences_append, entrySequences_map_entry, entrySequences_entry_singleton,
+    List.map_append]
+
+theorem visible_admit (sub : Subscriber) (m : StoredMessage) :
+    visible { sub with pending := sub.pending ++ [m], lastEnqueued := m.sequence }
+      = visible sub ++ [Observed.entry m] := by
+  simp [visible, List.map_append, List.append_assoc]
+
+theorem visible_drain (sub : Subscriber) :
+    visible { sub with observed := sub.observed ++ sub.pending.map Observed.entry, pending := [] }
+      = visible sub := by
+  simp [visible]
+
+theorem visible_drain_done (sub : Subscriber) (e : SubError) :
+    visible { sub with observed := sub.observed ++ sub.pending.map Observed.entry, pending := [],
+                       status := QueueStatus.done e }
+      = visible sub := by
+  simp [visible]
+
 theorem pairwise_lt_append_singleton {l : List Nat} {x : Nat}
     (h : l.Pairwise (· < ·)) (hx : ∀ y ∈ l, y < x) : (l ++ [x]).Pairwise (· < ·) := by
   rw [List.pairwise_append]

@@ -69,7 +69,8 @@ EffectNatsSubstrate/
   Next.lean        Label; deliverOne / endOne / pullStep; replayBound; apply / Next / ReachableSub
   SubTraces.lean   SubTrace runner, eight stage-A traces (C7–C10, C13–C15, M1, Q1), W1/W2 wrong models
   SubInvariants.lean  visible, entrySequences, SubInv (eleven clauses), StateInv, SubShape
-  SubCore.lean     lookup and step-shape lemmas over the core
+   SubCore.lean     lookup and step-shape lemmas over the core; visible / entrySequences
+                    equations
   SubProofs.lean   per-label preservation of SubInv; SA1 frame; selectReplay lemmas
   SubReachable.lean  the only ReachableSub induction: SA2 stateInv_reachable, SA3 pending_le_capacity
   SubStatements.lean SA4–SA7 and the negative witnesses (snapshot r3.1)
