@@ -77,6 +77,23 @@ theorem applyPull_ok_eq {s s' : SubState} {id : SubId}
       cases h
       exact ⟨sub, sub', hsub, hpull, rfl⟩
 
+/-- Unsubscribe hits an existing subscriber that was not already shut down. -/
+theorem applyUnsubscribe_ok_eq {s s' : SubState} {id : SubId}
+    (h : applyUnsubscribe s id = some s') :
+    ∃ sub, lookupSub s.subs id = some sub ∧ sub.status ≠ .shutDown ∧
+      s' = { s with
+             subs := updateSub s.subs id
+               (fun sub => { sub with registered := false, pending := [], status := .shutDown }) } := by
+  unfold applyUnsubscribe at h
+  split at h
+  · cases h
+  · rename_i sub hsub
+    split at h
+    · cases h
+    · rename_i hne
+      cases h
+      exact ⟨sub, hsub, fun heq => hne heq, rfl⟩
+
 theorem applyRegister_core {s s' : SubState} {stream : StreamName} {opts : ConsumeOptions}
     {l₀ : StreamSeq} {id : SubId} {e : Expect}
     (h : applyRegister s stream opts l₀ id e = some s') : s'.core = s.core := by
@@ -99,12 +116,8 @@ theorem applyPull_core {s s' : SubState} {id : SubId}
 
 theorem applyUnsubscribe_core {s s' : SubState} {id : SubId}
     (h : applyUnsubscribe s id = some s') : s'.core = s.core := by
-  unfold applyUnsubscribe at h
-  split at h
-  · cases h
-  · split at h
-    · cases h
-    · cases h; rfl
+  obtain ⟨_, _, _, heq⟩ := applyUnsubscribe_ok_eq h
+  rw [heq]
 
 theorem apply_core {s s' : SubState} {l : Label} (h : apply s l = some s') :
     s'.core = s.core ∨ ∃ o r, step s.core o = .ok (s'.core, r) := by

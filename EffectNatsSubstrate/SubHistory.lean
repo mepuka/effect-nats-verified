@@ -559,30 +559,25 @@ theorem histInv_unsubscribe {sH : SubStateH} {id : SubId} {base' : SubState}
     (hinv : HistInv sH) (hx : apply sH.base (.unsubscribe id) = some base') :
     HistInv { base := base', committed := committedAfter sH (.unsubscribe id),
               regs := regsAfter sH (.unsubscribe id) } := by
-  have h' : applyUnsubscribe sH.base id = some base' := hx
-  unfold applyUnsubscribe at h'
-  split at h'
-  · cases h'
-  · rename_i sub hsub
-    split at h'
-    · cases h'
-    · cases h'
-      refine ⟨hinv.coreCommitted, hinv.regsBelow, ?_⟩
-      intro p hp
-      have hp' : p ∈ updateSub sH.base.subs id
-          (fun sub => { sub with registered := false, pending := [], status := .shutDown }) := hp
-      rcases mem_updateSub_eq hp' with hold | ⟨hpid, sub₀, h₀, hp2⟩
-      · exact hinv.subs p hold
-      · obtain ⟨r, hr, hat, _, hent⟩ := hinv.subs (id, sub₀) h₀
-        rw [hpid, hp2]
-        refine ⟨r, hr, hat, ?_, ?_⟩
-        · intro hreg
-          cases hreg
-        · intro m hm
-          have hm' : Observed.entry m ∈ sub₀.observed ++ ([] : List StoredMessage).map Observed.entry :=
-            hm
-          simp only [List.map_nil, List.append_nil] at hm'
-          exact hent m (List.mem_append.mpr (Or.inl hm'))
+  obtain ⟨sub, hsub, _, heq⟩ :=
+    applyUnsubscribe_ok_eq (s' := base') (show applyUnsubscribe sH.base id = some base' from hx)
+  subst heq
+  refine ⟨hinv.coreCommitted, hinv.regsBelow, ?_⟩
+  intro p hp
+  have hp' : p ∈ updateSub sH.base.subs id
+      (fun sub => { sub with registered := false, pending := [], status := .shutDown }) := hp
+  rcases mem_updateSub_eq hp' with hold | ⟨hpid, sub₀, h₀, hp2⟩
+  · exact hinv.subs p hold
+  · obtain ⟨r, hr, hat, _, hent⟩ := hinv.subs (id, sub₀) h₀
+    rw [hpid, hp2]
+    refine ⟨r, hr, hat, ?_, ?_⟩
+    · intro hreg
+      cases hreg
+    · intro m hm
+      have hm' : Observed.entry m ∈ sub₀.observed ++ ([] : List StoredMessage).map Observed.entry :=
+        hm
+      simp only [List.map_nil, List.append_nil] at hm'
+      exact hent m (List.mem_append.mpr (Or.inl hm'))
 
 theorem histInv_step {sH sH' : SubStateH} {l : Label} (hreach : ReachableSubH sH)
     (hinv : HistInv sH) (h : applyH sH l = some sH') : HistInv sH' := by

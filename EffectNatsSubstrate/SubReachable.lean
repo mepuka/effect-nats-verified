@@ -200,20 +200,15 @@ theorem applyPull_inv {s s' : SubState} {id : SubId} (hinv : StateInv s)
 
 theorem applyUnsubscribe_inv {s s' : SubState} {id : SubId} (hinv : StateInv s)
     (h : applyUnsubscribe s id = some s') : StateInv s' := by
-  unfold applyUnsubscribe at h
-  split at h
-  · cases h
-  · rename_i sub hsub
-    split at h
-    · cases h
-    · cases h
-      intro p hp
-      have hp' : p ∈ updateSub s.subs id
-          (fun sub => { sub with registered := false, pending := [], status := .shutDown }) := hp
-      rcases mem_updateSub hp' with hold | ⟨sub₀, h₀, hp2⟩
-      · exact (hinv p hold).core_eq rfl
-      · rw [hp2]
-        exact (unsubscribe_inv (hinv _ h₀)).core_eq rfl
+  obtain ⟨sub, hsub, _, heq⟩ := applyUnsubscribe_ok_eq h
+  rw [heq]
+  intro p hp
+  have hp' : p ∈ updateSub s.subs id
+      (fun sub => { sub with registered := false, pending := [], status := .shutDown }) := hp
+  rcases mem_updateSub hp' with hold | ⟨sub₀, h₀, hp2⟩
+  · exact (hinv p hold).core_eq rfl
+  · rw [hp2]
+    exact (unsubscribe_inv (hinv _ h₀)).core_eq rfl
 
 theorem apply_inv {s s' : SubState} {l : Label} (hreach : Reachable s.core) (hinv : StateInv s)
     (h : apply s l = some s') : StateInv s' := by
@@ -405,14 +400,11 @@ theorem apply_shape {s s' : SubState} {l : Label} (h : apply s l = some s') (hs 
     · rw [heq]; exact updateSub_keys _ _ _
     · rw [heq]; exact Nat.le_refl _
   | unsubscribe id =>
-    have h' : applyUnsubscribe s id = some s' := h
-    unfold applyUnsubscribe at h'
-    split at h'
-    · cases h'
-    · split at h'
-      · cases h'
-      · cases h'
-        exact shape_of_keys hs (updateSub_keys _ _ _) (Nat.le_refl _)
+    obtain ⟨_, _, _, heq⟩ :=
+      applyUnsubscribe_ok_eq (s' := s') (show applyUnsubscribe s id = some s' from h)
+    refine shape_of_keys hs ?_ ?_
+    · rw [heq]; exact updateSub_keys _ _ _
+    · rw [heq]; exact Nat.le_refl _
 
 /-- The state shape holds on every reachable state: ids strictly ascending, all below `nextId`. -/
 theorem subShape_reachable {s : SubState} (h : ReachableSub s) : SubShape s :=
