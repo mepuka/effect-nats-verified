@@ -299,6 +299,52 @@ hypothesis-free `_self`, picks either `_ne` and fixes the call sites in the othe
 both plus `updateRt_keys` into one shared `RtListLemmas.lean` that both import. This is a
 coordinator fix-up commit on `main`, not lane work.
 
+### P7 — `ApplyLaws.lean`: the law layer over stage A's parametric skeleton (L7a)
+
+(M) `import EffectNatsSubstrate.SubStatements` and `EffectNatsSubstrate.SubPlacements` — one import
+deeper than the packet named (`SubProofs`), because the re-derivation reuses `lookupSub_map`
+(`SubReachable.lean:264`), `visible_eq_of_subs_unchanged` and `publishedMessage`
+(`SubStatements.lean:169`, `:24`), and because `op_visible_frame_is_instance` needs the frozen
+`op_visible_frame` in scope to compare against. Proof-side; nothing frozen changes.
+
+**Laws.** `DeliverLaws deliver` — `stream_stable`, `filters_stable`, `observed_grows`, `not_target`,
+`not_matching`; `PullLaws pull` — `stream_stable`, `filters_stable`, `observed_grows`,
+`shutDown_disabled`. All nine are *frame* conditions on one subscriber; no law mentions `pending`,
+`status`, `lastEnqueued`, `registered`, or `policy`. `not_matching` is the only addition to the
+packet's sketch: `SubStatements.op_visible_frame` (`:177`) has the disjunctive hypothesis
+`sub.stream ≠ stream ∨ matchesAny sub.filters subject = false`, and `not_target` covers only the
+left disjunct. The consumer of `observed_grows` on both sides is `SubPlacements.appended` (`:42`),
+whose `drop`-based definition means "the events this transition appended" only when `observed`
+never shrinks.
+
+**Obligations.** `deliverOne_laws : DeliverLaws deliverOne`, `pullStep_laws : PullLaws pullStep`.
+
+**The W1/W2 finding.** The packet's sketch expected `pullStepW1_not_laws : ¬ PullLaws pullStepW1`.
+It is **false**, and the module proves its negation: `pullStepW1_laws : PullLaws pullStepW1` and
+`deliverOneW2_laws : DeliverLaws deliverOneW2`, each paired with its trace-level exclusion in
+`w1_law_abiding_but_trace_excluded` and `w2_law_abiding_but_trace_excluded` (the second conjunct is
+`w1_outside_outcomes` / `w2_outside_outcomes`, `SubPlacements.lean:131`, `:138`). W1 differs from the
+model in *how much* a pull drains, which no frame law mentions; W2 moves only fields no law
+constrains. The one law-shaped fact that would exclude W1 is queue fact Q1's drain equation
+(`∀ a a', a.status = .opened → pull a = some a' → a'.observed = a.observed ++ a.pending.map .entry ∧
+a'.pending = []`, slice document §2.4), and it was deliberately left out: it pins `pull` down to its
+definition on `.opened` — the only branch where W1 differs — so a representation satisfying it
+already *is* `pullStep` there, and admitting it would make the discriminator true by construction.
+**Consequence for P6/L7b: frame laws alone do not certify a replacement `deliver`/`pull`; a
+simulation does.** The laws buy the frame theorems for free; every invariant-preservation theorem
+(`deliverOne_inv`, `pullStep_inv`, `stateInv_reachable`, the `LagInv` chain, the `SubHistory`
+chain) rests on the *equations* of the concrete steps and stays a refinement obligation.
+
+**Re-derivation.** `op_visible_frame_generic` restates `SubStatements.op_visible_frame` over
+`applyWith deliver pull` under `DeliverLaws deliver`, using exactly `not_target` and `not_matching`;
+`op_visible_frame_of_laws` is the concrete instance at `deliverOne_laws`, and
+`op_visible_frame_is_instance : @op_visible_frame = @op_visible_frame_of_laws := rfl` checks that
+the restated type is the frozen one rather than asserting it. `afterOp_publish_sub_generic` is the
+law-free skeleton form of `SubStatements.afterOp_publish_sub` (`:31`).
+
+(A) gate green; the frozen statements untouched; the module in the root import list, in
+`scripts/Axioms.lean`, and in `README.md` "Layout".
+
 ## 4. Gate
 
 `bash scripts/gate.sh` (build clean, forbidden sweep, `#print axioms` over `scripts/Axioms.lean`,

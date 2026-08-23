@@ -222,3 +222,15 @@ open EffectNatsSubstrate
 #print axioms a4inclusion_witness
 #print axioms abstractHistoryFrom_agreeAt
 #print axioms abstractHistoryFrom_strip_pull
+#print axioms DeliverLaws
+#print axioms PullLaws
+#print axioms deliverOne_laws
+#print axioms pullStep_laws
+#print axioms pullStepW1_laws
+#print axioms deliverOneW2_laws
+#print axioms w1_law_abiding_but_trace_excluded
+#print axioms w2_law_abiding_but_trace_excluded
+#print axioms afterOp_publish_sub_generic
+#print axioms op_visible_frame_generic
+#print axioms op_visible_frame_of_laws
+#print axioms op_visible_frame_is_instance

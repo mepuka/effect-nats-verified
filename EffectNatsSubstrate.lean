@@ -29,3 +29,4 @@ import EffectNatsSubstrate.SimAgree
 import EffectNatsSubstrate.RtWitnesses
 import EffectNatsSubstrate.SubStatements
 import EffectNatsSubstrate.SubHistory
+import EffectNatsSubstrate.ApplyLaws
